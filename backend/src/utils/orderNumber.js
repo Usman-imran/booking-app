@@ -1,0 +1,34 @@
+// Concurrency-safe ORD-YYYYMMDD-XXX order number generation
+// (PROJECT_SPEC.md §11).
+//
+// The whole scheme rests on one atomic UPSERT against a one-row-per-day
+// counter table. Concurrent callers for the same day serialize on that
+// row's lock (Postgres blocks the second UPSERT until the first commits or
+// rolls back); callers for different days never contend at all.
+//
+// IMPORTANT: `client` must be a connection that is inside the SAME
+// transaction as whatever else is happening for this order submission
+// (e.g. via `pool.connect()` + BEGIN, not the shared `pool` directly). That
+// is what makes a failed/rolled-back submission harmless: if the caller's
+// transaction rolls back, this increment rolls back with it, and the next
+// caller gets that exact number back rather than a permanent gap.
+export const MAX_DAILY_SEQUENCE = 999;
+export const ORDER_NUMBER_RE = /^ORD-\d{8}-\d{3}$/;
+
+export async function reserveNextOrderNumber(client) {
+  const { rows } = await client.query(
+    `INSERT INTO order_number_counters (counter_date, last_sequence)
+     VALUES (CURRENT_DATE, 1)
+     ON CONFLICT (counter_date)
+     DO UPDATE SET last_sequence = order_number_counters.last_sequence + 1
+     RETURNING to_char(counter_date, 'YYYYMMDD') AS date_key, last_sequence`
+  );
+
+  const { date_key: dateKey, last_sequence: sequence } = rows[0];
+
+  if (sequence > MAX_DAILY_SEQUENCE) {
+    throw new Error(`Daily order number sequence exhausted for ${dateKey} (max ${MAX_DAILY_SEQUENCE} per day).`);
+  }
+
+  return `ORD-${dateKey}-${String(sequence).padStart(3, '0')}`;
+}

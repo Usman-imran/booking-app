@@ -1,0 +1,70 @@
+import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import apiClient, { setAuthToken } from '../api/client.js';
+
+const TOKEN_STORAGE_KEY = 'orderBookingApp.authToken';
+const AuthContext = createContext(null);
+
+export function AuthProvider({ children }) {
+  const [user, setUser] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // On mount (including page refresh), try to resume a session from a
+  // previously stored token by asking the API who it belongs to.
+  useEffect(() => {
+    let cancelled = false;
+
+    async function hydrate() {
+      const storedToken = localStorage.getItem(TOKEN_STORAGE_KEY);
+
+      if (!storedToken) {
+        setIsLoading(false);
+        return;
+      }
+
+      setAuthToken(storedToken);
+
+      try {
+        const data = await apiClient.get('/auth/me');
+        if (!cancelled) setUser(data.user);
+      } catch {
+        localStorage.removeItem(TOKEN_STORAGE_KEY);
+        setAuthToken(null);
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    }
+
+    hydrate();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const login = useCallback(async (username, password) => {
+    const data = await apiClient.post('/auth/login', { username, password });
+    localStorage.setItem(TOKEN_STORAGE_KEY, data.token);
+    setAuthToken(data.token);
+    setUser(data.user);
+  }, []);
+
+  const logout = useCallback(() => {
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
+    setAuthToken(null);
+    setUser(null);
+  }, []);
+
+  return (
+    <AuthContext.Provider value={{ user, isLoading, login, logout }}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+export function useAuth() {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+}
