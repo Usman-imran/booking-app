@@ -44,10 +44,10 @@ order-booking-app/
 │   └── .env.example
 ├── frontend/           React app (Vite)
 │   ├── src/
-│   │   ├── api/        Reusable API client (fetch wrapper, carries the auth token) + customers.js, products.js, orders.js, users.js, reports.js, targets.js
+│   │   ├── api/        Reusable API client (fetch wrapper, carries the auth token) + customers.js, products.js, companies.js, orders.js, users.js, reports.js, targets.js
 │   │   ├── auth/       AuthContext (session state, login/logout, hydration on refresh)
-│   │   ├── components/ Shared UI (layout, nav, ProtectedRoute, ConfirmDialog, ErrorBoundary)
-│   │   ├── pages/      Login, Dashboard, pages/customers/, pages/products/, pages/orders/, pages/reports/, pages/targets/
+│   │   ├── components/ Shared UI (layout, nav, ProtectedRoute, ConfirmDialog, ErrorBoundary) + orders/ (receipt)
+│   │   ├── pages/      Login, Dashboard, pages/customers/, pages/products/, pages/companies/, pages/orders/, pages/reports/, pages/targets/
 │   │   ├── App.jsx     Route definitions
 │   │   └── main.jsx    Entry point
 │   └── .env.example
@@ -130,6 +130,11 @@ Migrations applied so far:
 - `order_items` table (id, order_id, product_id, product_name, product_code, mrp, rate, discount, paid_qty, bonus_qty, scheme_purchase_qty, scheme_bonus_qty, line_subtotal, line_discount, line_total, created_at, updated_at — `PROJECT_SPEC.md` §16). `order_id` cascades on delete (so deleting a draft cleans up its items); `product_id` is `ON DELETE RESTRICT`. Every commercial column here is a **snapshot taken at order time** — changing the product's price, discount, or scheme afterward never touches existing order items (verified directly: changed a product's price/discount/scheme after creating an order item referencing it, and the item was unaffected). `line_total = line_subtotal - line_discount` is enforced by a check constraint, as is the scheme snapshot being both-or-neither (`scheme_purchase_qty`/`scheme_bonus_qty`). Written by the Order API — see [Orders API](#orders-api).
 - `order_number_counters` table (`counter_date` primary key, `last_sequence`) — one row per calendar day, backing the order numbering system below.
 
+- `users.company_name` (varchar(150), nullable) — the distribution business a booker works for, set at registration and
+  used to brand the sidebar and the order receipt. Nullable so accounts created before the column existed stay valid;
+  the UI falls back rather than showing an empty header. A check constraint stops a present-but-blank value, which
+  would defeat that fallback.
+
 - `monthly_targets` table (id, year, month, company, target_amount, created_at, updated_at — `PROJECT_SPEC.md` §19). `company` NULL is the month's overall target; a value scopes it to that manufacturer. A unique index on `(year, month, lower(coalesce(company, '')))` allows exactly one target per month per scope — `COALESCE` so NULLs don't count as distinct, `lower` so `GSK` and `gsk` can't become two targets for the same sales. Manufacturer is free text matched against `products.company`, not a foreign key: companies aren't an entity in this application.
 
 Sales figures are computed from orders rather than stored, so there is no reports table.
@@ -155,9 +160,84 @@ See [Quick Start](#quick-start) — `cd frontend && cp .env.example .env && npm 
 ## Authentication
 
 - `POST /api/auth/login` — body `{ "username": "...", "password": "..." }`. Returns `{ "token": "...", "user": {...} }` on success. A JWT is used as the token (see `backend/src/utils/jwt.js`); there is no session table. Errors: `400` if username/password are missing, `401` for an unknown username or wrong password (same generic message for both, to avoid revealing which one was wrong), `403` if the account exists and the password is correct but the user is inactive.
+- `POST /api/auth/register` — creates a booker. Body `{ name, username, password, companyName, phone? }`; `password`
+  must be at least 8 characters and `companyName` is **required**, because it is what the application is branded with.
+  Returns `{ token, user }` — the new account is signed straight in, so first-run setup isn't a two-step dance. `409`
+  if the username is taken, `400` with per-field messages otherwise.
+
+  **Who may register:** anyone, while the system has **no users at all** — that is the first-run account that names the
+  business. After that it requires a signed-in booker (`401` otherwise). This application has no roles and no
+  permissions by design (`PROJECT_SPEC.md` §2), so every account can read every customer, order and sales figure; an
+  endpoint that let anyone create one would hand the whole business's data to whoever found the URL. Gating it this way
+  keeps self-service setup without leaving the door open behind it. If you want registration fully open, it is a
+  two-line change in `backend/src/routes/auth.routes.js`.
+
+- `PUT /api/auth/company` — renames the business. Body `{ companyName }`; requires a signed-in booker. Returns the
+  refreshed user and `accountsUpdated`. An application-level setting (`PROJECT_SPEC.md` §24), not a business record —
+  it changes what the app calls itself, and touches no customer, product or order data.
+
+- `GET /api/auth/registration-status` — public; `{ open }` says whether an account can be created without signing in
+  (i.e. whether this is a fresh installation). The sign-in page uses it to show its setup link only when that link
+  would actually work.
+
 - `GET /api/auth/me` — requires `Authorization: Bearer <token>`. Returns the current user (password hash never included). The `authenticate` middleware (`backend/src/middleware/authenticate.js`) re-checks the user's active status against the database on every request, so deactivating a user revokes access immediately, without waiting for the token to expire.
 - There are no roles or permissions — every authenticated booker has the same access, per `PROJECT_SPEC.md` §2.
 - `JWT_SECRET` and `JWT_EXPIRES_IN` (see `.env.example`) configure the token; generate your own secret for anything beyond local development.
+
+### Company branding
+
+`users.company_name` is the distribution business a booker works for, captured at registration. It is **not**
+`products.company`, which is a medicine's manufacturer (`PROJECT_SPEC.md` §5) — the two are unrelated and deliberately
+kept apart.
+
+It travels with the session: returned by `POST /api/auth/login`, `POST /api/auth/register` and `GET /api/auth/me` as
+`user.companyName`, so it is available anywhere `useAuth()` is, and carried in the JWT payload as a convenience for
+anything inspecting the token. The token is never the source of truth — the `authenticate` middleware re-reads the user
+on every request, so a changed company name takes effect immediately rather than at the next login.
+
+Two places use it:
+
+- **Sidebar header** — the business name replaces the generic app title.
+- **Order receipt** — the printed heading, in both the on-screen preview and the vector PDF, plus the page footer.
+
+**Fallback**: anywhere the name is missing, empty or only whitespace, both fall back to **"Medicine Distribution"**. The
+column is nullable on purpose — accounts created before it existed have nothing to backfill with, and inventing a
+company name would put a wrong one on someone's invoice. A `NULL` is a safe, visible state rather than a broken one. On
+the receipt, the strapline is dropped when it would just repeat the heading.
+
+### Settings UI
+
+`/settings` (sidebar: **Settings**), from `frontend/src/pages/settings/Settings.jsx`. Deliberately minimal: §24 permits
+a Settings section for application-level configuration and warns against inventing settings without a requirement, so
+it holds the one thing that genuinely is application-level — the company name — plus a read-only summary of the
+signed-in account. No business data lives here.
+
+Saving calls `PUT /api/auth/company` and then `refreshUser()`, so the sidebar and any receipt pick the new name up
+immediately without a reload. Save is disabled while the value is unchanged or blank.
+
+**The rename applies to every account on the installation.** There is one business per installation (§1), and two
+bookers printing receipts headed with different names for the same firm would be a bug, not a feature. The page says
+so, and reports how many accounts were updated. Any booker may do it — there are no roles (§2), and inventing an admin
+concept for one field would contradict that.
+
+**Historical receipts are not rewritten**: a receipt is generated from the current name each time it is exported, so
+re-exporting an older order shows the new name. The order's own commercial values are untouched (§16).
+
+### Signup UI
+
+`/signup` (`frontend/src/pages/Signup.jsx`), public, sharing the sign-in card. It serves the two cases the API allows
+and says which one it is in, rather than showing one form that sometimes fails:
+
+- **First run** — no users exist. "Create your account": company name, full name, username, optional phone, password
+  and confirmation. On success the new session is adopted and the booker lands on the dashboard.
+- **Adding a colleague** — a signed-in booker opens `/signup`. The heading becomes "Add a booker", and the token the
+  API returns for the new account is deliberately **ignored**: switching the current booker into the account they just
+  created would be a surprising way to log them out. A confirmation names the new username, the form clears, and they
+  stay signed in.
+- **Anyone else** — told the installation is already set up, with a link to sign in, because the API would refuse them.
+
+The password is confirmed twice: there is no password reset in this application, so a typo on the first account would
+lock the business out entirely. The sign-in page links here only while registration is open.
 
 ### Frontend session handling
 
@@ -313,6 +393,42 @@ Under `frontend/src/pages/products/`, behind the same login/`ProtectedRoute` and
 This is deliberately the whole of it: there is no user management in the application and none is planned — no roles, no
 permissions, every authenticated booker has the same access (`PROJECT_SPEC.md` §2).
 
+## Companies API
+
+- `GET /api/companies` — every manufacturer that has at least one **active** product, with how many it has:
+  `{ companies: [{ company, productCount }], total, totalProducts }`, sorted by name.
+
+- `GET /api/products?company=<name>` — one manufacturer's products. An **exact** name match (case-insensitive), not
+  the partial `ILIKE` that `search` uses, so browsing `GSK` can never pull in `GSK Consumer`. Combines with `search`,
+  `isActive` and pagination, so the company view can search within a company.
+
+**There is no companies table, and there should not be one.** Company is a field on the product
+(`PROJECT_SPEC.md` §5), and §21/§27 warn against inventing entities. Both endpoints derive the list from the products
+themselves, so it stays correct on its own as products are added, edited, imported or deactivated — there is nothing
+to keep in step, and no way for a company record to outlive its products.
+
+Counts are of active products only, so a manufacturer whose products have all been deactivated drops off the list: it
+has nothing left to sell. The endpoint is deliberately not paginated and does no server-side search — the list is
+bounded by how many manufacturers a distributor deals with, which is dozens, and §35 asks for server-side search on
+*large* datasets.
+
+### Companies UI
+
+`/companies` (sidebar: **Companies**), from `frontend/src/pages/companies/`.
+
+- `CompanyList.jsx` (`/companies`) — a grid of company cards showing the manufacturer and its active product count,
+  with a search box that filters the already-loaded list in the browser rather than firing a request per keystroke.
+  The header line totals the companies and their products. Loading, error-with-Retry and empty states throughout; the
+  empty state explains that a company appears as soon as an active product is assigned to one, and links to the
+  product import.
+- `CompanyProducts.jsx` (`/companies/:companyName`) — that manufacturer's catalogue: Product Name, Code, MRP, Sale
+  Price, Discount and Bonus Scheme, with a debounced search *within* the company, pagination, and a **Back to
+  Companies** button. Product names link through to the product's own page.
+
+Shows active products only, so the table total always agrees with the count on the company's card — a product missing
+from here has been deactivated, and the empty state says so and points at the Products page, which shows inactive ones
+too. The company name is percent-encoded into the URL, since manufacturer names contain spaces and punctuation.
+
 ## Orders API
 
 All endpoints are under `/api/orders` and require `Authorization: Bearer <token>`. Implemented in
@@ -383,11 +499,17 @@ and creating a new one.
 
 ### What the server decides, and what the client may send
 
-A client sends **only** `customerId`, `status`, `remarks`, and `{ productId, quantity }` per line. Rate, MRP, discount,
-bonus quantity, line totals, order totals, the order number, and the booker are all derived server-side and any such
-values in the request body are ignored — a client can't set its own price, award itself a bonus, or book an order in
-someone else's name (`PROJECT_SPEC.md` §6, §9, §11, §33). The `quantity` you send is the **paid** quantity; bonus units
-are added on top of it, never taken out of it.
+A client sends `customerId`, `status`, `remarks`, and `{ productId, quantity, discount? }` per line. Rate, MRP, bonus
+quantity, line totals, order totals, the order number, and the booker are all derived server-side and any such values
+in the request body are ignored — a client can't set its own price, award itself a bonus, or book an order in someone
+else's name (`PROJECT_SPEC.md` §6, §9, §11, §33). The `quantity` you send is the **paid** quantity; bonus units are
+added on top of it, never taken out of it.
+
+**`discount` is the one commercial value a client may set.** It is optional — omit it and the product's own discount
+applies, which is what most lines do — and validated like any other input (a number 0–100, rounded to 2 decimals).
+Discounting a particular sale is a decision the booker makes at the counter, and §7 only requires that whatever was
+used is snapshotted onto the order item, which it is. The rate deliberately does **not** follow: a negotiated discount
+is ordinary trade, a client naming its own unit price would make every sales figure meaningless.
 
 ### How a line is calculated
 
@@ -442,45 +564,37 @@ no route that can change one.
 
 ### Create Order UI
 
-`/orders/new` (sidebar: **Create Order**), built from `frontend/src/pages/orders/`. It follows the order flow in
-`PROJECT_SPEC.md` §10 top to bottom, and is deliberately the fastest screen in the app (§25).
+`/orders/new` (sidebar: **Create Order**), built from `frontend/src/pages/orders/`. This is the screen a booker spends
+the day in, so it is laid out as a two-column workspace rather than a form: **products on the left, the order being
+built on the right**. Searching never pushes the order off screen, and the running total is always visible.
 
-- `CreateOrder.jsx` — the screen: customer, product search, the order items table, and the Order Summary. Holds the
-  working order in component state; nothing is persisted until Save as Draft or Submit Order is pressed.
-- `CustomerPicker.jsx` — a searchable dropdown rather than a `<select>`, because a distributor's customer list is far
-  too long to scroll. Type to filter on name or code, arrow keys to move, Enter to pick; the chosen customer is then
-  shown as a card with contact details and a Change button. Only active customers are offered.
-- `ProductPicker.jsx` — the product table is on screen from the start (pre-loaded, not hidden behind a search), shows
-  the rate, discount and scheme that will apply before you add anything, and **Enter adds the top match** so a whole
-  order can be entered from the keyboard. Adding a product that's already on the order bumps its quantity instead of
-  creating a duplicate line — the API takes each product once with one total quantity. Only active products are offered.
-- `orderCalc.js` — the live preview maths, and a deliberate mirror of the backend's `orderPricing.js`.
+- `CreateOrder.jsx` — the workspace: state, the cart, the summary and the save actions. Also serves
+  `/orders/drafts/:id/edit` (see [Draft Orders UI](#draft-orders-ui)).
+- `ProductBrowser.jsx` — the left column. The search box **takes focus on arrival**, the list is populated before
+  anything is typed, and a company filter narrows it. Each row shows name, code, packing/unit, company, rate, any
+  product discount, and the scheme as a `20 + 2` badge — plus how many are already on the order, so a booker can see
+  at a glance what they've added. **Fully keyboard-driven**: <kbd>↑</kbd>/<kbd>↓</kbd> move the highlight,
+  <kbd>Enter</kbd> adds, focus stays in the search box, and the search text is deliberately *not* cleared — adding
+  several strengths of the same medicine is the common case. Adding a product already on the order bumps its quantity
+  rather than making a second line.
+- `CustomerPicker.jsx` — unchanged searchable dropdown (name or code), now at the top of the cart.
+- `orderCalc.js` — the live preview maths, mirroring the backend's `orderPricing.js` signature for signature.
 
-**Order items table** — one row per product with rate, an editable quantity, the scheme (`20 + 2`), the calculated
-bonus, line subtotal, line discount and line total. Everything recalculates as the quantity is typed. Paid and bonus
-quantities are kept visually distinct (§25): the bonus shows as a green `+2` badge, and a note under the table states
-that bonus units are free and added on top of the paid quantity, never taken out of it.
+**Cart line controls**: a `− [qty] +` stepper alongside a direct number input (steppers for one-at-a-time, typing for
+"40"), an editable **discount %** box that re-prices the line as you type, a green **`+2 Bonus Free`** badge when a
+scheme applies (or a muted `20+2 scheme` reminder when the quantity isn't there yet), the line total, and a single-click
+`×` to remove. Invalid quantities and discounts are flagged in the box itself.
 
-**Order Summary** — Total Items, Total Paid Qty, Total Bonus Qty, Subtotal, Total Discount and Grand Total, in a panel
-that stays in view while products are added, with the Remarks box and both actions beneath it.
+**Summary**: Items, Paid Qty, Bonus Qty, Subtotal, Discount, then the **Grand Total** in a dark navy block — the one
+number the screen exists to produce — followed by Remarks and the Save as Draft / Submit Order pair.
 
-**Save as Draft / Submit Order** — both `POST /api/orders`, with `status` set accordingly. A draft only needs a
-customer (it can be empty); submitting needs at least one line and a valid quantity on every line. Client-side checks
-mirror the API's rules so mistakes are caught without a round trip, and any server error is shown verbatim. On success
-the form resets and a banner reports the **server's** figures — the order number for a submitted order, or a note that
-a draft has no number until it's submitted.
+**Empty state**: "No items added yet", with the keyboard hint, rather than a blank panel.
 
-**Why the maths exists twice**: the booker has to watch the bonus and the line total change as they type, which has to
-happen locally. The server never trusts those numbers — it recalculates every one of them from each product's own
-current values at save time, and what it returns is what was stored. The two implementations were checked against each
-other over 20,983 combinations of price, discount, scheme and quantity (including 0.01 rates, 33.33 discounts,
-half-configured schemes, and 500 randomised multi-line orders) and agree exactly, so a rounding difference can't put a
-different number on screen than in the database.
+**Responsive**: below 1100px the columns stack with the **order first** — what has been added matters more than the
+catalogue when there's no room for both. The cart is sticky above that width so the total never scrolls away.
 
-**States** — loading states on both searches, empty states that distinguish "nothing matches your search" from "nothing
-exists yet", retry buttons on failed searches, inline validation messages, invalid quantities highlighted in the row
-itself, and a confirmation dialog before Clear Order discards a part-built order (§25). The layout is responsive: the
-summary drops below the items on narrow screens instead of squeezing the table.
+**No sales arithmetic is trusted from here.** The preview is local so figures move as you type, but the server
+recalculates every line on save and its numbers are what the success banner reports.
 
 ### Draft Orders UI
 
@@ -513,6 +627,51 @@ summary drops below the items on narrow screens instead of squeezing the table.
 saved* — the total in the confirmation dialog is the total that gets stored. Continuing a draft first re-prices it at
 today's values, which is what §6 prescribes for the moment a product is added to an order. Both paths show the booker
 the figures they're committing to before they commit, which is the property that matters.
+
+### Order Receipt (share / export)
+
+A printable receipt for a submitted order, exportable as PDF or JPG and shareable to WhatsApp. Reached from
+**Share / Export** on the order's detail page, or **Share** on its row in the Orders list. From
+`frontend/src/components/orders/`.
+
+- `receiptData.js` — flattens an order into exactly what a receipt prints. Every
+  amount is the snapshot stored on the order, never recomputed from the product: a receipt for a six-month-old order
+  must show the prices it was actually placed at (`PROJECT_SPEC.md` §16).
+- `receiptPdf.js` — draws the PDF with jsPDF's own primitives.
+- `OrderReceiptModal.jsx` — the on-screen preview and the three actions.
+
+**The receipt is rendered twice, on purpose.** The HTML version drives the on-screen preview and the JPG; the PDF is
+drawn as real vector text. The obvious alternative — screenshot the HTML with html2canvas and paste that bitmap into a
+PDF — is one less layout to maintain, but produces *a picture of a receipt*: fuzzy when zoomed, unselectable,
+unsearchable, and hundreds of kilobytes. A receipt gets printed, forwarded and read on a phone, so it's worth drawing
+properly. The real PDF is ~15 KB for a 7-line order with selectable text; it paginates, repeating the table header, and
+numbers its pages. **Both renderers take their figures from `buildReceipt()`** — two layouts is the accepted cost, two
+sets of arithmetic would be a bug waiting to happen.
+
+**Design**: dark navy (`#0F172A`) header band and totals block, `#1E3A8A` table header, white ground, charcoal text.
+Header carries the booker's company name (see [Company branding](#company-branding)), order number, date and a status chip (green Submitted / red Cancelled); then Bill To and
+Booked By; then the line table — Product, Rate, Paid Qty, Bonus, Disc %, Line Total; then remarks beside the totals
+block, ending in the grand total. Bonus quantity is a green `+N` pill in both renderers, never a plain number, because
+free stock must not read as another figure that was paid for.
+
+**html2canvas constraints** shaped the CSS: it re-implements CSS to rasterise a node and silently drops what it can't
+parse, so every receipt rule uses plain hex and px, and the receipt is a **fixed 760px wide** — one that reflowed with
+the browser window would export differently depending on who pressed the button.
+
+**WhatsApp**: no web API can hand a file to WhatsApp from a link. So the flow is: generate and download the receipt
+image, then open `web.whatsapp.com` for the user to pick a chat and attach it — with no number to target, `wa.me`
+and `api.whatsapp.com/send` land on a marketing page or a download prompt, while this opens straight into the chat
+list for an already-signed-in user. Nothing is pre-filled and no
+number is targeted — the booker chooses the recipient in WhatsApp itself, where their real contact list is, rather
+than through a number typed into this app that may be incomplete or missing a country code. The customer's phone
+still prints on the receipt itself, under Bill To.
+
+**Bundle cost**: `jspdf` (390 KB) and `html2canvas` (201 KB) are loaded with dynamic `import()` inside the export
+handlers, so they build as separate chunks and never load for the many sessions that don't export a receipt.
+
+**Availability**: submitted orders only, from both the list and the detail view. Drafts have no order number and aren't
+orders yet; the modal renders a cancelled order correctly (red chip, "not payable" line, a warning in the WhatsApp
+text) should one be reached, but no button offers it.
 
 ### Orders UI
 

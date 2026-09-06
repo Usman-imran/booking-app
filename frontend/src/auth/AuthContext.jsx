@@ -48,6 +48,27 @@ export function AuthProvider({ children }) {
     setUser(data.user);
   }, []);
 
+  // Adopts a session the caller already obtained — used by first-run signup,
+  // where /auth/register hands back a token for the account it just created.
+  //
+  // Deliberately separate from login(): an existing booker adding a
+  // colleague also gets a token back, and must NOT be switched into the new
+  // account. Only the caller knows which case it is.
+  const adoptSession = useCallback((token, nextUser) => {
+    localStorage.setItem(TOKEN_STORAGE_KEY, token);
+    setAuthToken(token);
+    setUser(nextUser);
+  }, []);
+
+  // Re-reads the signed-in user from the API. Used after a settings change
+  // so the sidebar and receipts pick up the new company name straight away,
+  // rather than waiting for the next page load.
+  const refreshUser = useCallback(async () => {
+    const data = await apiClient.get('/auth/me');
+    setUser(data.user);
+    return data.user;
+  }, []);
+
   const logout = useCallback(() => {
     localStorage.removeItem(TOKEN_STORAGE_KEY);
     setAuthToken(null);
@@ -55,7 +76,7 @@ export function AuthProvider({ children }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, logout }}>
+    <AuthContext.Provider value={{ user, isLoading, login, logout, adoptSession, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

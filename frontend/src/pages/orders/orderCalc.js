@@ -46,22 +46,27 @@ export function calculateBonusQty(product, paidQty) {
 // One order line at the product's current price and discount. `paidQty` of
 // 0 (an empty or not-yet-valid quantity box) yields a zeroed line rather
 // than NaN, so the summary stays readable while the booker is typing.
-export function calculateLine(product, paidQty) {
+export function calculateLine(product, paidQty, { discount } = {}) {
   const qty = Number.isInteger(paidQty) && paidQty > 0 ? paidQty : 0;
 
   const rateCents = toCents(product.salePrice);
   const lineSubtotalCents = rateCents * qty;
 
-  // Discount is a per-line percentage with 2 decimals (PROJECT_SPEC.md §7),
-  // scaled to hundredths of a percent to keep the arithmetic in integers.
-  const discountHundredths = Math.round(Number(product.discount) * CENTS);
+  // Discount is a per-line percentage with 2 decimals (PROJECT_SPEC.md §7).
+  // The product's own discount is the default; the booker can override it
+  // for this line, and whichever value applies is what the server stores.
+  // Signature mirrors the backend's buildOrderLine exactly, so the two stay
+  // directly comparable.
+  const effectiveDiscount =
+    discount === undefined || discount === null ? Number(product.discount) : Number(discount);
+  const discountHundredths = Math.round(effectiveDiscount * CENTS);
   const lineDiscountCents = Math.round((lineSubtotalCents * discountHundredths) / (100 * CENTS));
 
   return {
     paidQty: qty,
     bonusQty: calculateBonusQty(product, qty),
     rate: Number(product.salePrice),
-    discount: Number(product.discount),
+    discount: effectiveDiscount,
     lineSubtotal: fromCents(lineSubtotalCents),
     lineDiscount: fromCents(lineDiscountCents),
     lineTotal: fromCents(lineSubtotalCents - lineDiscountCents),

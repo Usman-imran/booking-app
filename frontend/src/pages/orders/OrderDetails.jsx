@@ -5,6 +5,7 @@ import ConfirmDialog from '../../components/ConfirmDialog.jsx';
 import { formatScheme } from '../products/schemeFormat.js';
 import { formatMoney } from './orderCalc.js';
 import OrderStatusBadge from './OrderStatusBadge.jsx';
+import OrderReceiptModal from '../../components/orders/OrderReceiptModal.jsx';
 
 function formatDateTime(value) {
   if (!value) return '—';
@@ -33,6 +34,7 @@ export default function OrderDetails() {
   const [status, setStatus] = useState('loading');
   const [error, setError] = useState(null);
 
+  const [isReceiptOpen, setIsReceiptOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState(null); // 'submit' | 'delete' | 'cancel'
   const [isMutating, setIsMutating] = useState(false);
   const [actionError, setActionError] = useState(null);
@@ -164,9 +166,14 @@ export default function OrderDetails() {
             </>
           )}
           {isSubmitted && (
-            <button type="button" className="btn-danger" onClick={() => setConfirmAction('cancel')}>
-              Cancel Order
-            </button>
+            <>
+              <button type="button" className="btn-secondary" onClick={() => setIsReceiptOpen(true)}>
+                Share / Export
+              </button>
+              <button type="button" className="btn-danger" onClick={() => setConfirmAction('cancel')}>
+                Cancel Order
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -347,6 +354,8 @@ export default function OrderDetails() {
           </button>
         </div>
       )}
+
+      <OrderReceiptModal open={isReceiptOpen} order={order} onClose={() => setIsReceiptOpen(false)} />
 
       <ConfirmDialog
         open={confirmAction !== null}

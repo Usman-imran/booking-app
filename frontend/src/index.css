@@ -30,6 +30,10 @@ a {
 .sidebar h1 {
   font-size: 1.1rem;
   margin: 0 0 1.5rem;
+  /* A company name is arbitrary text and can be long or unbroken, so it
+     wraps rather than pushing the sidebar wider. */
+  overflow-wrap: anywhere;
+  line-height: 1.3;
 }
 
 .sidebar nav {
@@ -544,47 +548,9 @@ a {
   flex-wrap: wrap;
 }
 
-/* Create Order screen */
-
-.section-card {
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  padding: 1.25rem 1.5rem 1.5rem;
-  margin-bottom: 1.25rem;
-}
-
-.section-card > .form-section-title:first-child {
-  margin-top: 0;
-}
-
-/* Items on the left, a summary that stays in view on the right. */
-.order-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
-  gap: 1.25rem;
-  align-items: start;
-}
-
-.order-main {
-  min-width: 0;
-}
-
-.order-summary {
-  position: sticky;
-  top: 1rem;
-}
-
-.summary-card {
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  padding: 1.25rem 1.5rem 1.5rem;
-}
-
-.summary-card > .form-section-title:first-child {
-  margin-top: 0;
-}
+/* Shared summary list -----------------------------------------------------
+   A label/value column used by the Create Order cart, Order Details and
+   Targets. Deliberately not tied to any one screen. */
 
 .summary-list {
   margin: 0;
@@ -655,19 +621,457 @@ a {
   font-size: 0.75rem;
 }
 
-.summary-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  margin-top: 1.25rem;
-}
-
-.summary-actions button {
-  width: 100%;
-}
-
 .summary-note {
   margin: 0.9rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: #6b7280;
+}
+
+/* Create Order workspace --------------------------------------------------
+   Two columns: products on the left, the order being built on the right.
+   The cart is sticky so the running total never scrolls away while the
+   booker works down a long product list. */
+
+.section-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 1.25rem 1.5rem 1.5rem;
+  margin-bottom: 1.25rem;
+}
+
+.section-card > .form-section-title:first-child {
+  margin-top: 0;
+}
+
+.order-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 400px;
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.workspace-panel {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 1.1rem 1.25rem 1.25rem;
+  min-width: 0;
+  box-shadow: 0 1px 2px rgba(17, 24, 39, 0.04);
+}
+
+.workspace-cart {
+  position: sticky;
+  top: 1rem;
+  min-width: 0;
+}
+
+.panel-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 0.85rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6b7280;
+}
+
+.panel-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.35rem;
+  height: 1.35rem;
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  background: #1f2937;
+  color: #fff;
+  font-size: 0.75rem;
+  letter-spacing: 0;
+}
+
+/* --- Product browser (left) --- */
+
+/* Grid children default to min-width:auto, which lets long product names
+   push the whole panel wider than its column. */
+.browser {
+  min-width: 0;
+}
+
+.browser-controls {
+  display: flex;
+  gap: 0.6rem;
+  margin-bottom: 0.5rem;
+}
+
+.browser-search {
+  flex: 1;
+  min-width: 0;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 0.95rem;
+}
+
+.browser-search:focus {
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
+}
+
+.browser-filter {
+  padding: 0.6rem 0.7rem;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 0.9rem;
+  max-width: 190px;
+}
+
+.browser-hint {
+  margin: 0 0 0.75rem;
+  font-size: 0.78rem;
+  color: #6b7280;
+}
+
+.browser-hint kbd {
+  display: inline-block;
+  padding: 0.05rem 0.35rem;
+  border: 1px solid #d1d5db;
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: #f9fafb;
+  font-family: inherit;
+  font-size: 0.75rem;
+  color: #374151;
+}
+
+.browser-message {
+  padding: 1.25rem 1rem;
+  border: 1px dashed #e5e7eb;
+  border-radius: 8px;
+  color: #6b7280;
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.browser-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.browser-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 0.6rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid transparent;
+}
+
+/* Highlight follows both the mouse and the arrow keys, so the keyboard
+   path is visible rather than invisible state. */
+.browser-item.is-highlighted {
+  background: #f8fafc;
+  border-color: #dbeafe;
+}
+
+.browser-item-main {
+  min-width: 0;
+}
+
+.browser-item-name {
+  font-weight: 600;
+  font-size: 0.92rem;
+  overflow-wrap: anywhere;
+}
+
+.browser-in-cart {
+  display: inline-block;
+  margin-left: 0.45rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: #1f2937;
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 600;
+  vertical-align: middle;
+}
+
+.browser-item-meta {
+  font-size: 0.78rem;
+  color: #6b7280;
+  overflow-wrap: anywhere;
+}
+
+.browser-item-price {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.browser-item-rate {
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+
+.browser-item-discount {
+  font-size: 0.72rem;
+  color: #166534;
+}
+
+.browser-item-scheme {
+  min-width: 4.5rem;
+  text-align: right;
+  font-size: 0.8rem;
+}
+
+.scheme-badge {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1e40af;
+  font-weight: 600;
+  font-size: 0.78rem;
+}
+
+/* --- Cart (right) --- */
+
+.cart-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  box-shadow: 0 1px 2px rgba(17, 24, 39, 0.04);
+  overflow: hidden;
+}
+
+.cart-section {
+  padding: 1.1rem 1.25rem;
+}
+
+.cart-section + .cart-section {
+  border-top: 1px solid #f0f1f3;
+}
+
+.cart-lines-section {
+  padding-bottom: 0.6rem;
+}
+
+.cart-empty {
+  padding: 1.5rem 1rem;
+  border: 1px dashed #e5e7eb;
+  border-radius: 8px;
+  text-align: center;
+}
+
+.cart-empty-title {
+  font-weight: 600;
+  color: #374151;
+}
+
+.cart-empty-hint {
+  margin-top: 0.25rem;
+  font-size: 0.82rem;
+  color: #6b7280;
+}
+
+.cart-empty-hint kbd {
+  padding: 0.05rem 0.3rem;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  background: #f9fafb;
+  font-family: inherit;
+  font-size: 0.75rem;
+}
+
+.cart-lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 42vh;
+  overflow-y: auto;
+}
+
+.cart-line {
+  padding: 0.7rem 0;
+  border-bottom: 1px solid #f0f1f3;
+}
+
+.cart-line:last-child {
+  border-bottom: none;
+}
+
+.cart-line-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.cart-line-identity {
+  min-width: 0;
+}
+
+.cart-line-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+.cart-line-meta {
+  font-size: 0.75rem;
+  color: #6b7280;
+  overflow-wrap: anywhere;
+}
+
+.cart-remove {
+  flex-shrink: 0;
+  width: 1.5rem;
+  height: 1.5rem;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: #9ca3af;
+  font-size: 1.15rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.cart-remove:not(:disabled):hover {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.cart-line-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.qty-stepper {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.qty-stepper button {
+  width: 1.9rem;
+  height: 1.9rem;
+  border: none;
+  background: #f9fafb;
+  color: #374151;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.qty-stepper button:not(:disabled):hover {
+  background: #f3f4f6;
+}
+
+.qty-stepper button:disabled {
+  color: #d1d5db;
+  cursor: not-allowed;
+}
+
+.qty-stepper .qty-input {
+  width: 3.4rem;
+  border: none;
+  border-left: 1px solid #e5e7eb;
+  border-right: 1px solid #e5e7eb;
+  border-radius: 0;
+  height: 1.9rem;
+  text-align: center;
+  padding: 0 0.2rem;
+}
+
+.discount-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.78rem;
+}
+
+.discount-input {
+  width: 3.6rem;
+  height: 1.9rem;
+  padding: 0 0.4rem;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  text-align: right;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.discount-input:focus,
+.qty-stepper .qty-input:focus {
+  outline: 2px solid #2563eb;
+  outline-offset: -1px;
+}
+
+.discount-input-invalid {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.cart-line-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.cart-line-scheme {
+  font-size: 0.75rem;
+}
+
+.cart-line-total {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The one number the whole screen exists to produce. */
+.cart-grand-total {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 0.75rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cart-grand-total strong {
+  font-size: 1.25rem;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.cart-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+
+.cart-note {
+  margin: 0.8rem 0 0;
   font-size: 0.75rem;
   line-height: 1.45;
   color: #6b7280;
@@ -862,15 +1266,22 @@ a {
   margin-left: 0.5rem;
 }
 
-/* Narrow screens: the summary drops below the items instead of squeezing
-   the table (PROJECT_SPEC.md §25 asks for a responsive UI). */
-@media (max-width: 1024px) {
-  .order-layout {
+/* Narrow screens: the two columns stack, with the ORDER first — what has
+   been added matters more than the catalogue when there's no room for
+   both (PROJECT_SPEC.md §25). */
+@media (max-width: 1100px) {
+  .order-workspace {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .order-summary {
+  .workspace-cart {
     position: static;
+    order: -1;
+  }
+
+  .cart-lines,
+  .browser-list {
+    max-height: none;
   }
 }
 
@@ -1530,4 +1941,338 @@ a {
 
 .import-updates .table-scroll {
   margin-top: 0.5rem;
+}
+
+/* Companies grid */
+
+.company-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.85rem;
+}
+
+.company-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 1rem 1.15rem;
+  min-width: 0;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.company-card:hover {
+  border-color: #9ca3af;
+  box-shadow: 0 2px 8px rgba(17, 24, 39, 0.06);
+}
+
+.company-card-name {
+  font-weight: 600;
+  font-size: 1rem;
+  /* Manufacturer names can be long and have no spaces to break on. */
+  overflow-wrap: anywhere;
+}
+
+.company-card-count {
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+  color: #1f2937;
+}
+
+/* Order receipt (printable / exportable) --------------------------------
+   Every rule here uses plain hex and px. html2canvas re-implements CSS to
+   rasterise the node, and it silently drops what it can't parse — modern
+   colour functions, some shorthand — so the receipt deliberately avoids
+   anything clever. It is also a FIXED width: a receipt that reflowed with
+   the browser window would export differently depending on who pressed the
+   button. */
+
+.dialog-card-receipt {
+  max-width: 860px;
+  max-height: 92vh;
+  overflow-y: auto;
+}
+
+.receipt-preview {
+  overflow-x: auto;
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.receipt {
+  width: 760px;
+  background: #ffffff;
+  color: #1f2937;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.12);
+}
+
+.receipt-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  background: #0f172a;
+  color: #ffffff;
+  padding: 22px 28px;
+}
+
+.receipt-brand {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.receipt-tagline {
+  font-size: 12px;
+  color: #cbd5e1;
+  margin-top: 2px;
+}
+
+.receipt-header-right {
+  text-align: right;
+}
+
+.receipt-number {
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.receipt-date {
+  font-size: 12px;
+  color: #cbd5e1;
+  margin-top: 2px;
+}
+
+.receipt-status {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #ffffff;
+}
+
+.receipt-status-submitted {
+  background: #16a34a;
+}
+
+.receipt-status-cancelled {
+  background: #dc2626;
+}
+
+.receipt-parties {
+  display: flex;
+  padding: 20px 28px 16px;
+}
+
+.receipt-party {
+  width: 50%;
+  padding-right: 20px;
+}
+
+.receipt-party-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #6b7280;
+  margin-bottom: 4px;
+}
+
+.receipt-party-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.receipt-party-line {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.receipt-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.receipt-table thead th {
+  background: #1e3a8a;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-align: left;
+  padding: 9px 10px;
+}
+
+.receipt-table thead th:first-child {
+  padding-left: 28px;
+}
+
+.receipt-table thead th:last-child {
+  padding-right: 28px;
+}
+
+.receipt-table td {
+  padding: 9px 10px;
+  border-bottom: 1px solid #e5e7eb;
+  vertical-align: top;
+}
+
+.receipt-table td:first-child {
+  padding-left: 28px;
+}
+
+.receipt-table td:last-child {
+  padding-right: 28px;
+}
+
+.receipt-table tbody tr:nth-child(even) td {
+  background: #f8fafc;
+}
+
+.receipt-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.receipt-product {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.receipt-code {
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.receipt-line-total {
+  font-weight: 700;
+  color: #0f172a;
+}
+
+/* Bonus stock is free, so it must not read as another paid figure. */
+.receipt-bonus {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #dcfce7;
+  color: #166534;
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.receipt-footer {
+  display: flex;
+  justify-content: space-between;
+  padding: 18px 28px 26px;
+}
+
+.receipt-remarks {
+  width: 55%;
+  padding-right: 24px;
+}
+
+.receipt-remarks-text {
+  font-size: 12px;
+  color: #1f2937;
+  white-space: pre-wrap;
+}
+
+.receipt-note {
+  margin-top: 10px;
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.receipt-cancelled-note {
+  margin-top: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #dc2626;
+}
+
+.receipt-totals {
+  width: 45%;
+  max-width: 300px;
+}
+
+.receipt-total-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #6b7280;
+  padding: 3px 0;
+}
+
+.receipt-total-row strong {
+  color: #1f2937;
+  font-variant-numeric: tabular-nums;
+}
+
+.receipt-grand-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 10px;
+  padding: 11px 14px;
+  background: #0f172a;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.receipt-grand-total strong {
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Signup ------------------------------------------------------------------
+   Reuses the sign-in card, widened for a longer form. */
+
+.login-card-wide {
+  max-width: 420px;
+}
+
+.signup-link {
+  display: block;
+  margin-top: 1rem;
+  text-align: center;
+  font-size: 0.85rem;
+  color: #2563eb;
+}
+
+.signup-link:hover {
+  text-decoration: underline;
+}
+
+.signup-block-action {
+  margin-top: 1rem;
+  width: 100%;
+}
+
+.signup-note {
+  margin: 0.75rem 0 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: #6b7280;
+}
+
+.signup-success {
+  background: #dcfce7;
+  border: 1px solid #bbf7d0;
+  color: #166534;
+  padding: 0.6rem 0.7rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  margin-bottom: 0.5rem;
 }

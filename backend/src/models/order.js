@@ -92,7 +92,7 @@ async function buildOrderContents(client, { customerId, items }) {
     if (!row.is_active) {
       throw new ApiError(400, `Product is inactive and cannot be ordered: ${row.name}`);
     }
-    return buildOrderLine(toPublicProduct(row), item.quantity);
+    return buildOrderLine(toPublicProduct(row), item.quantity, { discount: item.discount });
   });
 
   const totals = sumOrderTotals(lines);

@@ -6,6 +6,7 @@ import ErrorBoundary from './components/ErrorBoundary.jsx';
 import NotFound from './pages/NotFound.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Login from './pages/Login.jsx';
+import Signup from './pages/Signup.jsx';
 import CustomerList from './pages/customers/CustomerList.jsx';
 import AddCustomer from './pages/customers/AddCustomer.jsx';
 import EditCustomer from './pages/customers/EditCustomer.jsx';
@@ -14,12 +15,15 @@ import ProductList from './pages/products/ProductList.jsx';
 import AddProduct from './pages/products/AddProduct.jsx';
 import EditProduct from './pages/products/EditProduct.jsx';
 import ProductDetails from './pages/products/ProductDetails.jsx';
+import CompanyList from './pages/companies/CompanyList.jsx';
+import CompanyProducts from './pages/companies/CompanyProducts.jsx';
 import CreateOrder from './pages/orders/CreateOrder.jsx';
 import DraftOrders from './pages/orders/DraftOrders.jsx';
 import OrderList from './pages/orders/OrderList.jsx';
 import OrderDetails from './pages/orders/OrderDetails.jsx';
 import SalesReports from './pages/reports/SalesReports.jsx';
 import Targets from './pages/targets/Targets.jsx';
+import Settings from './pages/settings/Settings.jsx';
 
 export default function App() {
   return (
@@ -27,6 +31,9 @@ export default function App() {
       <ErrorBoundary>
         <Routes>
           <Route path="/login" element={<Login />} />
+          {/* Public: the first account is created before anyone can sign
+              in. A signed-in booker adding a colleague lands here too. */}
+          <Route path="/signup" element={<Signup />} />
 
           <Route element={<ProtectedRoute />}>
             <Route element={<Layout />}>
@@ -39,6 +46,8 @@ export default function App() {
               <Route path="/products/new" element={<AddProduct />} />
               <Route path="/products/:id/edit" element={<EditProduct />} />
               <Route path="/products/:id" element={<ProductDetails />} />
+              <Route path="/companies" element={<CompanyList />} />
+              <Route path="/companies/:companyName" element={<CompanyProducts />} />
               <Route path="/orders/new" element={<CreateOrder />} />
               <Route path="/orders/drafts" element={<DraftOrders />} />
               {/* Every order — draft, submitted or cancelled — is shown by
@@ -50,6 +59,7 @@ export default function App() {
               <Route path="/orders/:id" element={<OrderDetails />} />
               <Route path="/reports" element={<SalesReports />} />
               <Route path="/targets" element={<Targets />} />
+              <Route path="/settings" element={<Settings />} />
               <Route path="*" element={<NotFound />} />
             </Route>
           </Route>

@@ -14,8 +14,8 @@ function buildQuery(params) {
 // `ids` is a comma-separated list that fetches exactly those products,
 // ignoring pagination. It exists so reopening a saved draft can re-price
 // every line from the products' current values in one request.
-export function listProducts({ page = 1, limit = 20, search, isActive, ids } = {}) {
-  return apiClient.get(`/products${buildQuery({ page, limit, search, isActive, ids: ids?.join(',') })}`);
+export function listProducts({ page = 1, limit = 20, search, isActive, ids, company } = {}) {
+  return apiClient.get(`/products${buildQuery({ page, limit, search, isActive, company, ids: ids?.join(',') })}`);
 }
 
 export function getProduct(id) {

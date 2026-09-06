@@ -305,6 +305,15 @@ router.get(
 
     const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
 
+    // Browsing one manufacturer's catalogue (the Companies section).
+    let company;
+    if (req.query.company !== undefined) {
+      if (typeof req.query.company !== 'string' || req.query.company.trim() === '') {
+        throw new ApiError(400, 'company must be a non-empty manufacturer name.');
+      }
+      company = req.query.company.trim();
+    }
+
     // `ids` fetches a known set of products in one go (comma-separated).
     // Capped at the same ceiling as an order's line count, since that is
     // what it exists for — reloading a saved draft's products.
@@ -334,6 +343,7 @@ router.get(
       search: search || undefined,
       isActive,
       ids,
+      company,
       page: ids ? 1 : page,
       limit: effectiveLimit,
     });

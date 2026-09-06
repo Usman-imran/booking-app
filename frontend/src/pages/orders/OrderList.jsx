@@ -5,6 +5,7 @@ import { listBookers } from '../../api/users.js';
 import ConfirmDialog from '../../components/ConfirmDialog.jsx';
 import CustomerPicker from './CustomerPicker.jsx';
 import OrderStatusBadge from './OrderStatusBadge.jsx';
+import OrderReceiptModal from '../../components/orders/OrderReceiptModal.jsx';
 import { formatMoney } from './orderCalc.js';
 
 const PAGE_SIZE = 20;
@@ -51,6 +52,10 @@ export default function OrderList() {
   const [error, setError] = useState(null);
 
   const [bookers, setBookers] = useState([]);
+
+  // Holds the order id whose receipt is open. The list only carries
+  // summaries, so the modal fetches the full order (with its lines) itself.
+  const [receiptOrderId, setReceiptOrderId] = useState(null);
 
   const [confirmTarget, setConfirmTarget] = useState(null);
   const [isMutating, setIsMutating] = useState(false);
@@ -323,9 +328,18 @@ export default function OrderList() {
                             allows (PROJECT_SPEC.md §14) — there is
                             deliberately no Edit action here. */}
                         {order.status === 'submitted' && (
-                          <button type="button" onClick={() => setConfirmTarget(order)}>
-                            Cancel
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              className="row-action-primary"
+                              onClick={() => setReceiptOrderId(order.id)}
+                            >
+                              Share
+                            </button>
+                            <button type="button" onClick={() => setConfirmTarget(order)}>
+                              Cancel
+                            </button>
+                          </>
                         )}
                       </td>
                     </tr>
@@ -358,6 +372,12 @@ export default function OrderList() {
           </div>
         </>
       )}
+
+      <OrderReceiptModal
+        open={Boolean(receiptOrderId)}
+        orderId={receiptOrderId}
+        onClose={() => setReceiptOrderId(null)}
+      />
 
       <ConfirmDialog
         open={Boolean(confirmTarget)}

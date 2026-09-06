@@ -59,11 +59,17 @@ function isValidDateString(value) {
 // contents, never its status. Submitting is its own endpoint, so an edit
 // can't quietly finalize an order the booker only meant to save.
 //
-// Note what is NOT accepted here at all: rate, MRP, discount, bonus
-// quantity, line totals, order totals, or an order number. Every one of
-// those is derived server-side from the product's current values at save
-// time (PROJECT_SPEC.md §6, §9, §11), so a client cannot set its own price
-// or award itself a bonus. Anything of the sort in the body is ignored.
+// Note what is NOT accepted here at all: rate, MRP, bonus quantity, line
+// totals, order totals, or an order number. Every one of those is derived
+// server-side from the product's current values at save time
+// (PROJECT_SPEC.md §6, §9, §11), so a client cannot set its own price or
+// award itself a bonus. Anything of the sort in the body is ignored.
+//
+// The one commercial value a client MAY set is a line's `discount`, because
+// discounting a particular sale is a decision the booker makes. It is
+// optional — omit it and the product's own discount applies — and validated
+// like any other input. Whatever is used is snapshotted onto the order item
+// (§7, §16), so reports and history stay honest either way.
 function validateOrderPayload(body, { allowStatus }) {
   const errors = [];
   const data = {};
@@ -145,12 +151,38 @@ function validateOrderPayload(body, { allowStatus }) {
     const quantity = item.quantity;
     if (typeof quantity !== 'number' || !Number.isInteger(quantity)) {
       errors.push(`${label}.quantity is required and must be a whole number.`);
-    } else if (quantity <= 0) {
+      return;
+    }
+    if (quantity <= 0) {
       errors.push(`${label}.quantity must be greater than 0.`);
-    } else if (quantity > MAX_QUANTITY) {
+      return;
+    }
+    if (quantity > MAX_QUANTITY) {
       errors.push(`${label}.quantity must be at most ${MAX_QUANTITY}.`);
-    } else if (typeof item.productId === 'string') {
-      data.items.push({ productId: item.productId, quantity });
+      return;
+    }
+
+    // Optional per-line discount override. Absent means "use the product's
+    // own discount", which is what almost every line does.
+    let discount;
+    if (item.discount !== undefined && item.discount !== null) {
+      // Number(null) === 0, hence the explicit guard above: an explicit
+      // null must not quietly become a 0% discount.
+      const value = typeof item.discount === 'number' ? item.discount : Number(item.discount);
+      if (!Number.isFinite(value)) {
+        errors.push(`${label}.discount must be a number between 0 and 100.`);
+        return;
+      }
+      if (value < 0 || value > 100) {
+        errors.push(`${label}.discount must be between 0 and 100.`);
+        return;
+      }
+      // Stored to 2 decimals; round rather than let the column truncate.
+      discount = Math.round(value * 100) / 100;
+    }
+
+    if (typeof item.productId === 'string') {
+      data.items.push({ productId: item.productId, quantity, discount });
     }
   });
 

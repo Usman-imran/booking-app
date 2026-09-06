@@ -8,6 +8,7 @@ import usersRouter from './users.routes.js';
 import reportsRouter from './reports.routes.js';
 import targetsRouter from './targets.routes.js';
 import dashboardRouter from './dashboard.routes.js';
+import companiesRouter from './companies.routes.js';
 
 const router = Router();
 
@@ -20,5 +21,6 @@ router.use('/users', usersRouter);
 router.use('/reports', reportsRouter);
 router.use('/targets', targetsRouter);
 router.use('/dashboard', dashboardRouter);
+router.use('/companies', companiesRouter);
 
 export default router;

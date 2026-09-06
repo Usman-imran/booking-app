@@ -68,16 +68,25 @@ function schemeApplies(product) {
 //
 // `product` is a normalized product (the shape returned by
 // `toPublicProduct`), not a raw database row.
-export function buildOrderLine(product, paidQty) {
+export function buildOrderLine(product, paidQty, { discount } = {}) {
   // The rate charged is the product's Sale Price; MRP is snapshotted
-  // alongside it for reference but is not what the line is priced on.
+  // alongside it for reference but is not what the line is priced on. The
+  // rate is never overridable — a client naming its own unit price would
+  // make every sales figure meaningless.
   const rateCents = toCents(product.salePrice);
   const lineSubtotalCents = rateCents * paidQty;
 
-  // Discount is a per-product percentage (PROJECT_SPEC.md §7) stored with 2
-  // decimals, so scale it to hundredths of a percent to keep the whole
-  // calculation in integers: subtotal x pct/100, rounded to the nearest cent.
-  const discountHundredths = Math.round(Number(product.discount) * CENTS);
+  // Discount is a per-product percentage (PROJECT_SPEC.md §7). The product's
+  // own discount is the default, but a booker can adjust it for one line of
+  // one order — discounting a particular sale is ordinary trade, and §7 only
+  // requires that whatever was used is snapshotted onto the order item.
+  // Whatever is agreed here is what gets stored and what reports read.
+  const effectiveDiscount = discount === undefined || discount === null ? Number(product.discount) : Number(discount);
+
+  // Stored with 2 decimals, so scale to hundredths of a percent to keep the
+  // whole calculation in integers: subtotal x pct/100, rounded to the
+  // nearest cent.
+  const discountHundredths = Math.round(effectiveDiscount * CENTS);
   const lineDiscountCents = Math.round((lineSubtotalCents * discountHundredths) / (100 * CENTS));
   const lineTotalCents = lineSubtotalCents - lineDiscountCents;
 
@@ -89,7 +98,7 @@ export function buildOrderLine(product, paidQty) {
     productCode: product.code,
     mrp: Number(product.mrp),
     rate: fromCents(rateCents),
-    discount: Number(product.discount),
+    discount: effectiveDiscount,
     paidQty,
     bonusQty: calculateBonusQty(product, paidQty),
     schemePurchaseQty: applies ? product.schemePurchaseQty : null,

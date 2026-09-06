@@ -1,17 +1,13 @@
-Update the Bulk Product Import logic to support "Upsert" (Update existing products and insert new ones):
+Add Dynamic Company Branding based on User Signup details:
 
-1. Matching & Update Logic (Backend):
-   - When processing Excel/CSV rows in POST /api/products/validate-bulk and POST /api/products/bulk-upload:
-     * Match existing products using Product Code (if provided) OR exact Product Name (case-insensitive).
-     * If a match is found: Update the existing product's fields (especially Company/Manufacturer, MRP, Sale Price, Discount, Schemes) instead of creating a duplicate row.
-     * If no match is found: Create/Insert as a new product (auto-generating Product Code if missing).
+1. Database & Auth Updates:
+   - Update `users` table schema to include a `company_name` column (string/text).
+   - Update Signup/Registration endpoint (`POST /api/auth/register` or user creation) to require `company_name`.
+   - Include `company_name` in the user's profile/auth payload and JWT token / AuthContext so it is available globally across the frontend.
 
-2. Validation & Summary Enhancements:
-   - Update the "Test / Validate File" summary response to show a breakdown:
-     * Total Rows Processed
-     * New Products to be Inserted
-     * Existing Products to be Updated
-   - Ensure the validation step verifies that rows matching existing products won't violate database constraints.
+2. Frontend Navigation & App Header (`src/components/Layout.jsx`):
+   - Display the logged-in user's `company_name` at the top bar or sidebar header instead of a generic title.
 
-3. Frontend Modal Update:
-   - In ProductList.jsx import modal, display the updated test summary showing how many new products will be added and how many existing products will have their details (like Company Name) updated.
+3. Order Receipt / Share Template Customization (`src/components/orders/OrderReceiptModal.jsx`):
+   - Replace the generic "Medicine Order Booking App" heading in the receipt template with the logged-in user's dynamic `company_name`.
+   - If `company_name` is empty/missing for any reason, fall back gracefully to "Medicine Distribution".

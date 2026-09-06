@@ -280,7 +280,7 @@ export async function deactivateProduct(id) {
   return rows[0] || null;
 }
 
-export async function listProducts({ search, isActive, ids, page, limit }) {
+export async function listProducts({ search, isActive, ids, company, page, limit }) {
   const conditions = [];
   const params = [];
 
@@ -300,6 +300,15 @@ export async function listProducts({ search, isActive, ids, page, limit }) {
   if (typeof isActive === 'boolean') {
     params.push(isActive);
     conditions.push(`is_active = $${params.length}`);
+  }
+
+  // Strictly one manufacturer — an exact match, not the partial ILIKE that
+  // `search` uses, so browsing "GSK" can never pull in "GSK Consumer".
+  // Compared case-insensitively for the same reason company-wise targets
+  // are: the name is typed by hand in more than one place.
+  if (company) {
+    params.push(company);
+    conditions.push(`lower(company) = lower($${params.length})`);
   }
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -327,6 +336,25 @@ export async function listProductCompanies() {
     `SELECT DISTINCT company FROM products WHERE company IS NOT NULL AND btrim(company) <> '' ORDER BY company ASC`
   );
   return rows.map((row) => row.company);
+}
+
+// Every manufacturer that has at least one ACTIVE product, with how many
+// it has. This is what the Companies section browses.
+//
+// Companies aren't an entity in this application — Company is a field on
+// the product (PROJECT_SPEC.md §5) and there is deliberately no companies
+// table (§21, §27) — so the list is derived from the products themselves.
+// A manufacturer whose products have all been deactivated therefore drops
+// out of the list, which is the intent: it has nothing left to sell.
+export async function listCompaniesWithCounts() {
+  const { rows } = await pool.query(
+    `SELECT company, COUNT(*)::int AS product_count
+     FROM products
+     WHERE is_active = true AND company IS NOT NULL AND btrim(company) <> ''
+     GROUP BY company
+     ORDER BY company ASC`
+  );
+  return rows.map((row) => ({ company: row.company, productCount: row.product_count }));
 }
 
 export function toPublicProduct(product) {
