@@ -676,18 +676,49 @@ Fields:
 
 - Month
 - Year
+- Company (optional)
 - Target Amount
 - Created/Updated timestamp
 
+## Target Scope
+
+A target is set for one of two scopes:
+
+- **Overall** — the whole month's sales, whichever manufacturer the products
+  came from. This is the target described by the rest of this section.
+- **Company-wise** — the sales of one manufacturer's products within that
+  month.
+
+A month has at most one overall target and at most one target per company.
+
+Company here is the manufacturer already recorded on the product (§5). It is
+not a separate entity and must not become one — do not create a companies
+table, a company module, or company-level customers or pricing.
+
+Company targets are independent of the overall target. They do not have to
+add up to it, and the overall target is never derived from them: products
+with no company recorded contribute to the overall target only.
+
+This is an approved extension to the original overall-only monthly target.
+It does **not** reopen Booker Targets or Area Targets, which remain excluded
+(§20, §43).
+
 ## Calculations
 
-**Achieved = valid sales during the selected month**
+Each scope is calculated the same way, over the sales belonging to it:
+
+**Achieved = valid sales during the selected month** (for a company target,
+only that manufacturer's product lines)
 
 **Remaining = Target - Achieved**
 
 **Achievement % = (Achieved / Target) × 100**
 
-If target is zero, avoid division-by-zero errors.
+If target is zero, avoid division-by-zero errors. A zero or absent target
+makes the percentage undefined, not infinite — report it as empty rather
+than as a number.
+
+Remaining may be negative when a target is exceeded.
 
 Target achievement must use the same sales rules as Sales Reports.
 
@@ -1265,7 +1296,7 @@ No RBAC.
 - Date-range
 
 ## Stage 9 — Targets
-- Monthly targets
+- Monthly targets (overall and company-wise)
 - Achieved
 - Remaining
 - Achievement percentage
@@ -1434,7 +1465,7 @@ Sales Reports:
 Yes
 
 Targets:
-Monthly only
+Monthly only (overall and company-wise)
 
 Cancelled Orders in Sales:
 No

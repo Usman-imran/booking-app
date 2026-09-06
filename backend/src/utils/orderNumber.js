@@ -13,6 +13,7 @@
 // transaction rolls back, this increment rolls back with it, and the next
 // caller gets that exact number back rather than a permanent gap.
 export const MAX_DAILY_SEQUENCE = 999;
+export const ORDER_NUMBER_EXHAUSTED = 'ORDER_NUMBER_EXHAUSTED';
 export const ORDER_NUMBER_RE = /^ORD-\d{8}-\d{3}$/;
 
 export async function reserveNextOrderNumber(client) {
@@ -27,7 +28,11 @@ export async function reserveNextOrderNumber(client) {
   const { date_key: dateKey, last_sequence: sequence } = rows[0];
 
   if (sequence > MAX_DAILY_SEQUENCE) {
-    throw new Error(`Daily order number sequence exhausted for ${dateKey} (max ${MAX_DAILY_SEQUENCE} per day).`);
+    const error = new Error(`Daily order number sequence exhausted for ${dateKey} (max ${MAX_DAILY_SEQUENCE} per day).`);
+    // Stable marker so the API layer can turn this into a meaningful
+    // response instead of a generic 500 (see routes/orders.routes.js).
+    error.code = ORDER_NUMBER_EXHAUSTED;
+    throw error;
   }
 
   return `ORD-${dateKey}-${String(sequence).padStart(3, '0')}`;

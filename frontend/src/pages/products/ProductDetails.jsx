@@ -58,7 +58,14 @@ export default function ProductDetails() {
     return (
       <div className="page-placeholder">
         <p>Could not load product: {error}</p>
-        <Link to="/products">Back to Products</Link>
+        <div className="form-actions">
+          <Link to="/products" className="btn-secondary">
+            Back to Products
+          </Link>
+          <button type="button" className="btn-primary" onClick={fetchProduct}>
+            Retry
+          </button>
+        </div>
       </div>
     );
   }

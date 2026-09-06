@@ -4,6 +4,9 @@ export default function ConfirmDialog({
   message,
   confirmLabel = 'Confirm',
   cancelLabel = 'Cancel',
+  // Destructive by default. Pass 'primary' for a confirmation that is
+  // irreversible but not destructive — submitting a draft, for instance.
+  confirmVariant = 'danger',
   isLoading = false,
   onConfirm,
   onCancel,
@@ -19,7 +22,12 @@ export default function ConfirmDialog({
           <button type="button" className="btn-secondary" onClick={onCancel} disabled={isLoading}>
             {cancelLabel}
           </button>
-          <button type="button" className="btn-danger" onClick={onConfirm} disabled={isLoading}>
+          <button
+            type="button"
+            className={confirmVariant === 'primary' ? 'btn-primary' : 'btn-danger'}
+            onClick={onConfirm}
+            disabled={isLoading}
+          >
             {isLoading ? 'Please wait…' : confirmLabel}
           </button>
         </div>

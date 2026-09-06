@@ -57,7 +57,14 @@ export default function CustomerDetails() {
     return (
       <div className="page-placeholder">
         <p>Could not load customer: {error}</p>
-        <Link to="/customers">Back to Customers</Link>
+        <div className="form-actions">
+          <Link to="/customers" className="btn-secondary">
+            Back to Customers
+          </Link>
+          <button type="button" className="btn-primary" onClick={fetchCustomer}>
+            Retry
+          </button>
+        </div>
       </div>
     );
   }

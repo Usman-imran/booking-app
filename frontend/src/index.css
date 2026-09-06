@@ -541,4 +541,993 @@ a {
   display: flex;
   justify-content: flex-end;
   gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+/* Create Order screen */
+
+.section-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 1.25rem 1.5rem 1.5rem;
+  margin-bottom: 1.25rem;
+}
+
+.section-card > .form-section-title:first-child {
+  margin-top: 0;
+}
+
+/* Items on the left, a summary that stays in view on the right. */
+.order-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.order-main {
+  min-width: 0;
+}
+
+.order-summary {
+  position: sticky;
+  top: 1rem;
+}
+
+.summary-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 1.25rem 1.5rem 1.5rem;
+}
+
+.summary-card > .form-section-title:first-child {
+  margin-top: 0;
+}
+
+.summary-list {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.summary-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.9rem;
+}
+
+.summary-row dt {
+  color: #6b7280;
+}
+
+.summary-row dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+.summary-grand-total {
+  margin-top: 0.35rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid #e5e7eb;
+  font-size: 1.05rem;
+}
+
+.summary-grand-total dt {
+  color: #1a1a1a;
+  font-weight: 600;
+}
+
+.summary-grand-total dd {
+  font-weight: 700;
+}
+
+.summary-remarks {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 1.25rem;
+  font-size: 0.85rem;
+  color: #374151;
+}
+
+.summary-remarks textarea {
+  padding: 0.55rem 0.7rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.summary-remarks textarea:focus {
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
+}
+
+.summary-remarks .muted {
+  align-self: flex-end;
+  font-size: 0.75rem;
+}
+
+.summary-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 1.25rem;
+}
+
+.summary-actions button {
+  width: 100%;
+}
+
+.summary-note {
+  margin: 0.9rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: #6b7280;
+}
+
+/* Customer combobox */
+
+.combobox {
+  position: relative;
+  max-width: 420px;
+}
+
+.combobox > input {
+  width: 100%;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.95rem;
+}
+
+.combobox > input:focus {
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
+}
+
+.combobox-list {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 0.25rem;
+  list-style: none;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 8px 20px rgba(17, 24, 39, 0.12);
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.combobox-option {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.5rem 0.6rem;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-family: inherit;
+}
+
+.combobox-option.highlighted {
+  background: #f3f4f6;
+}
+
+.combobox-option-title {
+  color: #1a1a1a;
+}
+
+.combobox-message {
+  padding: 0.6rem;
+  font-size: 0.85rem;
+  color: #6b7280;
+}
+
+.selected-customer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 0.85rem 1rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.selected-customer-name {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.selected-customer-meta {
+  margin-top: 0.15rem;
+  font-size: 0.85rem;
+}
+
+/* Product picker + order item rows */
+
+.toolbar-hint {
+  align-self: center;
+  font-size: 0.8rem;
+  color: #6b7280;
+}
+
+.picker-message {
+  padding: 1rem;
+  border: 1px dashed #e5e7eb;
+  border-radius: 8px;
+  color: #6b7280;
+  font-size: 0.9rem;
+}
+
+.picker-note {
+  margin: 0.75rem 0 0;
+  font-size: 0.8rem;
+  color: #6b7280;
+}
+
+.data-table th.numeric,
+.data-table td.numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.line-total {
+  font-weight: 600;
+}
+
+.qty-input {
+  width: 5.5rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.qty-input:focus {
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
+}
+
+.qty-input-invalid {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.bonus-badge {
+  display: inline-block;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  background: #dcfce7;
+  color: #166534;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.btn-compact {
+  padding: 0.3rem 0.7rem;
+  font-size: 0.85rem;
+}
+
+.link-button {
+  background: none;
+  border: none;
+  padding: 0;
+  color: #2563eb;
+  font-size: inherit;
+  font-family: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.link-danger {
+  color: #b91c1c;
+}
+
+.muted {
+  color: #6b7280;
+}
+
+.banner-success {
+  background: #dcfce7;
+  border: 1px solid #bbf7d0;
+  color: #166534;
+  padding: 0.7rem 0.9rem;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  margin-bottom: 1rem;
+}
+
+.banner-success .link-button {
+  color: #166534;
+  margin-left: 0.5rem;
+}
+
+/* Narrow screens: the summary drops below the items instead of squeezing
+   the table (PROJECT_SPEC.md §25 asks for a responsive UI). */
+@media (max-width: 1024px) {
+  .order-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .order-summary {
+    position: static;
+  }
+}
+
+@media (max-width: 640px) {
+  .content {
+    padding: 1rem;
+  }
+
+  .toolbar {
+    flex-wrap: wrap;
+  }
+
+  .toolbar input[type='text'] {
+    max-width: none;
+  }
+
+  .combobox {
+    max-width: none;
+  }
+}
+
+/* Draft Orders list + order detail view */
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.banner-info {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1e40af;
+  padding: 0.6rem 0.9rem;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  margin-bottom: 1rem;
+}
+
+/* Drafts have no order number, so a status pill carries the distinction
+   between Draft / Submitted / Cancelled (PROJECT_SPEC.md §25). */
+.status-draft {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.status-submitted {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.status-cancelled {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.page-header h2 .status-badge {
+  font-size: 0.75rem;
+  vertical-align: middle;
+}
+
+/* Remarks can be long; keep the row height stable and show the full text
+   on hover instead. */
+.cell-truncate {
+  max-width: 18rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.row-actions .row-action-primary {
+  color: #2563eb;
+}
+
+.row-actions button:disabled {
+  color: #9ca3af;
+  cursor: not-allowed;
+}
+
+.detail-card-wide {
+  max-width: none;
+}
+
+.detail-card-totals {
+  max-width: 360px;
+  margin-left: auto;
+  margin-top: 1.25rem;
+}
+
+/* Orders list filters + cancelled-order treatment */
+
+.filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.75rem 1rem;
+  align-items: end;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.25rem;
+}
+
+.filter-field,
+.filter-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+  color: #6b7280;
+  min-width: 0;
+}
+
+.filter-field-wide {
+  grid-column: span 2;
+}
+
+.filter-field input,
+.filter-field select {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-family: inherit;
+  color: #1a1a1a;
+  background: #fff;
+  min-width: 0;
+}
+
+.filter-field input:focus,
+.filter-field select:focus {
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
+}
+
+/* The customer filter reuses the Create Order combobox, which sizes itself
+   to a form rather than a filter cell. */
+.filter-field .combobox {
+  max-width: none;
+}
+
+.filter-actions {
+  display: flex;
+  align-items: end;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.filter-actions .is-active {
+  border-color: #1f2937;
+  color: #1f2937;
+  font-weight: 600;
+}
+
+/* A cancelled order is still fully readable — it stays on record — but must
+   never be mistaken for one that counts (PROJECT_SPEC.md §12, §25). */
+.row-cancelled td {
+  color: #6b7280;
+}
+
+.value-void {
+  text-decoration: line-through;
+  color: #6b7280;
+}
+
+.banner-cancelled {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+  padding: 0.7rem 0.9rem;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  margin-bottom: 1rem;
+}
+
+@media (max-width: 640px) {
+  .filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .filter-field-wide {
+    grid-column: span 1;
+  }
+}
+
+/* Sales Reports: tabs + summary tiles */
+
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+  border-bottom: 1px solid #e5e7eb;
+  margin-bottom: 1.25rem;
+}
+
+.tab {
+  padding: 0.55rem 0.95rem;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: #6b7280;
+  font-size: 0.9rem;
+  font-family: inherit;
+  cursor: pointer;
+  margin-bottom: -1px;
+}
+
+.tab:hover {
+  color: #1a1a1a;
+}
+
+.tab.is-active {
+  color: #1a1a1a;
+  font-weight: 600;
+  border-bottom-color: #1f2937;
+}
+
+.summary-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.summary-tile {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.summary-tile-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: #6b7280;
+}
+
+.summary-tile-value {
+  font-size: 1.25rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+/* The one figure everything else on the page adds up to. */
+.summary-tile-primary {
+  border-color: #1f2937;
+}
+
+.summary-tile-primary .summary-tile-value {
+  color: #1f2937;
+}
+
+/* Targets: set-target form, progress cards, status badges */
+
+.target-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem 1rem;
+  align-items: end;
+}
+
+.target-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.85rem;
+  margin-bottom: 1.25rem;
+}
+
+.target-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 1rem 1.15rem 1.15rem;
+  min-width: 0;
+}
+
+/* The month's overall target is the headline figure. */
+.target-card-primary {
+  border-color: #1f2937;
+}
+
+.target-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.target-card-title {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.target-card-figure {
+  font-size: 1.6rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 0.5rem;
+}
+
+.target-card-list {
+  margin-top: 0.85rem;
+}
+
+.progress-track {
+  height: 8px;
+  border-radius: 999px;
+  background: #f3f4f6;
+  overflow: hidden;
+}
+
+/* A zero target has no meaningful percentage to draw. */
+.progress-track-empty {
+  background: repeating-linear-gradient(90deg, #f3f4f6 0 6px, #e5e7eb 6px 12px);
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 200ms ease;
+}
+
+.progress-fill-achieved {
+  background: #16a34a;
+}
+
+.progress-fill-in-progress {
+  background: #2563eb;
+}
+
+.progress-fill-not-started {
+  background: #d1d5db;
+}
+
+.progress-fill-no-target {
+  background: #d1d5db;
+}
+
+.status-target-achieved {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.status-target-in-progress {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.status-target-not-started {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+.status-target-no-target {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+/* An exceeded target is good news, so it reads as a gain, not a deficit. */
+.target-exceeded {
+  color: #166534;
+  font-weight: 600;
+}
+
+/* Dashboard */
+
+.summary-tile-hint {
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
+/* Tiles that navigate somewhere read as clickable. */
+.summary-tile-link {
+  text-decoration: none;
+  transition: border-color 120ms ease;
+}
+
+.summary-tile-link:hover {
+  border-color: #9ca3af;
+}
+
+.form-section-title .status-badge {
+  margin-left: 0.5rem;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+/* --- Responsive layout (PROJECT_SPEC.md §25) ---------------------------
+   Below 900px the fixed 220px sidebar leaves too little room for the order
+   tables, so the shell stacks: the nav becomes a horizontal scrolling strip
+   above the content instead of a column beside it. */
+
+@media (max-width: 900px) {
+  .layout {
+    flex-direction: column;
+  }
+
+  .sidebar {
+    width: 100%;
+    padding: 0.75rem 1rem;
+  }
+
+  .sidebar h1 {
+    margin-bottom: 0.75rem;
+    font-size: 1rem;
+  }
+
+  .sidebar nav {
+    flex-direction: row;
+    gap: 0.35rem;
+    overflow-x: auto;
+    /* Keeps the row from being clipped mid-item while scrolling. */
+    padding-bottom: 0.25rem;
+  }
+
+  .sidebar nav a {
+    white-space: nowrap;
+    font-size: 0.9rem;
+  }
+
+  .topbar {
+    padding: 0.65rem 1rem;
+  }
+
+  .page-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .header-actions {
+    width: 100%;
+  }
+}
+
+@media (max-width: 640px) {
+  .form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .detail-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .detail-card-totals {
+    max-width: none;
+  }
+
+  .summary-actions {
+    flex-direction: column;
+  }
+
+  .header-actions .btn-primary,
+  .header-actions .btn-secondary {
+    flex: 1;
+  }
+
+  /* Row actions wrap rather than forcing the table wider. */
+  .row-actions {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+}
+
+/* Bulk product import modal */
+
+/* The import dialog carries a file drop area and an error table, so it
+   needs far more room than a confirmation prompt. */
+.dialog-card-wide {
+  max-width: 760px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.import-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0.75rem 1.5rem;
+  margin-bottom: 1rem;
+  font-size: 0.85rem;
+  color: #374151;
+}
+
+.import-columns ul {
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+  line-height: 1.5;
+}
+
+.import-columns-label {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background: #f3f4f6;
+  color: #6b7280;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.import-columns-required {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.import-verdict {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+}
+
+.import-tick {
+  font-size: 1.15rem;
+  line-height: 1.2;
+  font-weight: 700;
+}
+
+.import-error-message {
+  white-space: normal;
+  max-width: 34rem;
+}
+
+.dropzone {
+  position: relative;
+  border: 2px dashed #d1d5db;
+  border-radius: 8px;
+  padding: 1.75rem 1rem;
+  text-align: center;
+  background: #fafafa;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.dropzone.is-dragging {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+
+/* The input covers the whole zone so a click anywhere opens the picker,
+   while a drop still lands on the container. */
+.dropzone-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.dropzone-input:disabled {
+  cursor: not-allowed;
+}
+
+.dropzone-file {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+/* Sits above the file input's invisible overlay so it stays clickable. */
+.dropzone .link-button {
+  position: relative;
+  z-index: 1;
+  margin-top: 0.4rem;
+}
+
+.import-modes {
+  border: none;
+  padding: 1rem 0 0;
+  margin: 0 0 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.import-modes legend {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: #6b7280;
+  padding: 0;
+}
+
+.import-failures h4 {
+  margin: 1rem 0 0.5rem;
+  font-size: 0.95rem;
+}
+
+.import-error-list {
+  margin: 0;
+  padding-left: 1rem;
+  /* Error text is the one column that must wrap rather than widen. */
+  white-space: normal;
+}
+
+.import-failures .data-table td {
+  white-space: normal;
+  vertical-align: top;
+}
+
+/* Import summary breakdown: new vs updated */
+
+.import-breakdown {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+}
+
+.import-breakdown-item {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 0.7rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.import-breakdown-value {
+  font-size: 1.35rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.import-breakdown-label {
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
+.import-breakdown-bad {
+  border-color: #fecaca;
+}
+
+.import-breakdown-bad .import-breakdown-value {
+  color: #b91c1c;
+}
+
+/* Which existing products will change — collapsed by default, because the
+   counts above answer the question most of the time. */
+.import-updates {
+  margin-bottom: 1rem;
+}
+
+.import-updates summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: #374151;
+  padding: 0.35rem 0;
+}
+
+.import-updates .table-scroll {
+  margin-top: 0.5rem;
 }

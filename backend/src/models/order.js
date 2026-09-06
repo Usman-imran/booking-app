@@ -1,13 +1,40 @@
 import pool from '../config/db.js';
+import ApiError from '../utils/ApiError.js';
 import { reserveNextOrderNumber } from '../utils/orderNumber.js';
+import { buildOrderLine, sumOrderTotals, MAX_AMOUNT } from '../utils/orderPricing.js';
+import { findCustomerById } from './customer.js';
+import { findProductsByIds, toPublicProduct } from './product.js';
+import { createOrderItems, findOrderItemsByOrderId } from './orderItem.js';
 
 const SELECT_FIELDS =
   'id, order_number, customer_id, booker_id, status, remarks, subtotal, discount_total, total, submitted_at, cancelled_at, cancelled_by, created_at, updated_at';
 
-// Creates a new draft order. Drafts never have an order number — see
-// submitOrder(). Full order-creation business logic (line items, computed
-// totals) belongs to the Order API in a later stage; this is schema-level
-// access only.
+// The same column list qualified for the joined list/details queries below,
+// derived from SELECT_FIELDS so the two can never drift apart.
+const ORDER_FIELDS_QUALIFIED = SELECT_FIELDS.split(', ')
+  .map((field) => `o.${field}`)
+  .join(', ');
+
+// Joined once here so a listed/fetched order always carries the display
+// values every Orders view needs (PROJECT_SPEC.md §17), instead of the API
+// layer issuing a lookup per row.
+const ORDER_JOINS = `
+  FROM orders o
+  JOIN customers c ON c.id = o.customer_id
+  JOIN users b ON b.id = o.booker_id
+  -- Only set on a cancelled order, so this join must not drop rows.
+  LEFT JOIN users cb ON cb.id = o.cancelled_by`;
+
+const ORDER_JOINED_FIELDS = `${ORDER_FIELDS_QUALIFIED},
+    c.name AS customer_name, c.code AS customer_code, c.phone AS customer_phone,
+    c.address AS customer_address, c.city_area AS customer_city_area,
+    b.name AS booker_name, b.username AS booker_username,
+    cb.name AS cancelled_by_name`;
+
+// Creates an empty draft order (no line items, zero totals). Drafts never
+// have an order number — see submitOrder(). Orders created through the API
+// go through createOrderWithItems() below; this remains the minimal
+// schema-level helper.
 export async function createOrder({ customerId, bookerId, remarks }) {
   const { rows } = await pool.query(
     `INSERT INTO orders (customer_id, booker_id, remarks)
@@ -18,17 +45,319 @@ export async function createOrder({ customerId, bookerId, remarks }) {
   return rows[0];
 }
 
+// Creates a complete order — header, line items, totals, and (when
+// submitted) its order number — in ONE transaction (PROJECT_SPEC.md §30).
+// Either the whole order lands or nothing does; there is no path that
+// leaves a half-saved order behind.
+//
+// Everything commercial is decided HERE, on the server, from the products'
+// current values: the caller supplies only `{ productId, quantity }` per
+// line. A client can never dictate a rate, a discount, or a bonus quantity.
+//
+// The customer/product lookups deliberately run on the transaction's own
+// client, so the values snapshotted into the order items are read on the
+// same connection, inside the same transaction, that writes them.
+//
+// `status`: 'draft' saves the order for later and consumes no order number;
+// 'submitted' finalizes it — number reserved and `submitted_at` stamped in
+// this same transaction (PROJECT_SPEC.md §11, §13).
+// Validates the customer and turns `{ productId, quantity }` into fully
+// priced, fully snapshotted order lines plus the order's totals.
+//
+// Shared by order creation and draft editing so the two can never price an
+// order differently. Runs on the caller's transaction client, so the values
+// it reads are read on the same connection, inside the same transaction,
+// that will write them.
+async function buildOrderContents(client, { customerId, items }) {
+  const customer = await findCustomerById(customerId, client);
+  if (!customer) {
+    throw new ApiError(400, 'Customer not found.');
+  }
+  if (!customer.is_active) {
+    throw new ApiError(400, 'Customer is inactive and cannot be used for an order.');
+  }
+
+  // One lookup for every referenced product, then a snapshot per line.
+  const productRows = await findProductsByIds(
+    items.map((item) => item.productId),
+    client
+  );
+  const productsById = new Map(productRows.map((row) => [row.id, row]));
+
+  const lines = items.map((item) => {
+    const row = productsById.get(item.productId);
+    if (!row) {
+      throw new ApiError(400, `Product not found: ${item.productId}`);
+    }
+    if (!row.is_active) {
+      throw new ApiError(400, `Product is inactive and cannot be ordered: ${row.name}`);
+    }
+    return buildOrderLine(toPublicProduct(row), item.quantity);
+  });
+
+  const totals = sumOrderTotals(lines);
+  // Caught here rather than letting a numeric(14,2) overflow surface as a
+  // database error; the amounts involved are far past anything real.
+  if (totals.subtotal > MAX_AMOUNT) {
+    throw new ApiError(400, 'Order total is too large.');
+  }
+
+  return { lines, totals };
+}
+
+export async function createOrderWithItems({ customerId, bookerId, status, remarks, items }) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { lines, totals } = await buildOrderContents(client, { customerId, items });
+
+    // Reserved as late as possible: this takes a lock on the day's counter
+    // row that is held until COMMIT, and every other caller submitting
+    // today waits behind it (see utils/orderNumber.js). Drafts skip it
+    // entirely and never contend.
+    const orderNumber = status === 'submitted' ? await reserveNextOrderNumber(client) : null;
+
+    const { rows: orderRows } = await client.query(
+      `INSERT INTO orders (order_number, customer_id, booker_id, status, remarks, subtotal, discount_total, total, submitted_at)
+       -- $4 is explicitly cast because it is used both as a varchar column
+       -- value and in a text comparison, which PostgreSQL will not infer a
+       -- single type for. submitted_at uses the database clock, so it can
+       -- never disagree with the order number reserved above.
+       VALUES ($1, $2, $3, $4::text, $5, $6, $7, $8, CASE WHEN $4::text = 'submitted' THEN now() ELSE NULL END)
+       RETURNING ${SELECT_FIELDS}`,
+      [
+        orderNumber,
+        customerId,
+        bookerId,
+        status,
+        remarks ?? null,
+        totals.subtotal,
+        totals.discountTotal,
+        totals.total,
+      ]
+    );
+    const order = orderRows[0];
+
+    await createOrderItems(order.id, lines, client);
+
+    await client.query('COMMIT');
+    return order;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 export async function findOrderById(id) {
   const { rows } = await pool.query(`SELECT ${SELECT_FIELDS} FROM orders WHERE id = $1`, [id]);
   return rows[0] || null;
 }
 
-// Draft -> Submitted. This is the order numbering system's only entry
-// point: a number is reserved and assigned in the same transaction as the
-// status change, so a failure here rolls both back together and the
-// reserved number is cleanly reclaimed for the next caller (see
-// reserveNextOrderNumber's doc comment). `SELECT ... FOR UPDATE` also stops
-// the same draft from being submitted twice concurrently.
+// How many orders are sitting in a given status. The Dashboard needs the
+// draft/pending count (PROJECT_SPEC.md §3) and only the number, so this
+// avoids fetching a page of rows just to read a total off it.
+export async function countOrdersByStatus(statuses) {
+  const { rows } = await pool.query(`SELECT COUNT(*)::int AS total FROM orders WHERE status = ANY($1::text[])`, [
+    statuses,
+  ]);
+  return rows[0].total;
+}
+
+// Full order details: the order with its customer/booker information and
+// every line item (PROJECT_SPEC.md §17).
+export async function findOrderDetailsById(id) {
+  const { rows } = await pool.query(`SELECT ${ORDER_JOINED_FIELDS} ${ORDER_JOINS} WHERE o.id = $1`, [id]);
+  const order = rows[0];
+  if (!order) {
+    return null;
+  }
+
+  const items = await findOrderItemsByOrderId(order.id);
+  return { order, items };
+}
+
+// Paginated, filtered order list (PROJECT_SPEC.md §17: all orders, today's
+// orders, search, and date/customer/booker/status filters).
+//
+// `dateFrom`/`dateTo` are inclusive calendar dates matched against the
+// order's own date: when it was SUBMITTED for a submitted or cancelled
+// order, falling back to when it was created for a draft, which has no
+// submission date yet. That is the date this list displays, the date the
+// order's ORD-YYYYMMDD-XXX number was issued against, and the date Sales
+// Reports count the sale on (see models/report.js) — so no two screens can
+// disagree about which day an order belongs to. Compared in the database's
+// own timezone, the same reference the daily number sequence resets on.
+// An order's date for filtering. Deliberately identical to the sale date
+// Sales Reports use (models/report.js) for anything already submitted.
+const ORDER_DATE = 'COALESCE(o.submitted_at, o.created_at)';
+
+export async function listOrders({ search, statuses, customerId, bookerId, dateFrom, dateTo, page, limit }) {
+  const conditions = [];
+  const params = [];
+
+  if (search) {
+    params.push(`%${search}%`);
+    conditions.push(
+      `(o.order_number ILIKE $${params.length} OR c.name ILIKE $${params.length} OR c.code ILIKE $${params.length})`
+    );
+  }
+
+  // One status or several: the Orders module shows submitted and cancelled
+  // orders together (PROJECT_SPEC.md §17), while Draft Orders asks for
+  // drafts alone.
+  if (statuses && statuses.length > 0) {
+    params.push(statuses);
+    conditions.push(`o.status = ANY($${params.length}::text[])`);
+  }
+
+  if (customerId) {
+    params.push(customerId);
+    conditions.push(`o.customer_id = $${params.length}`);
+  }
+
+  if (bookerId) {
+    params.push(bookerId);
+    conditions.push(`o.booker_id = $${params.length}`);
+  }
+
+  if (dateFrom) {
+    params.push(dateFrom);
+    conditions.push(`${ORDER_DATE}::date >= $${params.length}::date`);
+  }
+
+  if (dateTo) {
+    params.push(dateTo);
+    conditions.push(`${ORDER_DATE}::date <= $${params.length}::date`);
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  const countResult = await pool.query(`SELECT COUNT(*)::int AS total ${ORDER_JOINS} ${whereClause}`, params);
+  const total = countResult.rows[0].total;
+
+  const dataParams = [...params, limit, (page - 1) * limit];
+  const { rows } = await pool.query(
+    `SELECT ${ORDER_JOINED_FIELDS},
+       (SELECT COUNT(*)::int FROM order_items oi WHERE oi.order_id = o.id) AS item_count
+     ${ORDER_JOINS}
+     ${whereClause}
+     ORDER BY o.created_at DESC, o.id DESC
+     LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+    dataParams
+  );
+
+  return { rows, total };
+}
+
+// Replaces a draft's entire contents — customer, remarks and every line —
+// in one transaction (PROJECT_SPEC.md §13: edit draft / continue order).
+//
+// ONLY drafts can be changed. A submitted order is immutable
+// (PROJECT_SPEC.md §14), and `SELECT ... FOR UPDATE` holds the row for the
+// whole transaction, so a draft can't be edited and submitted at the same
+// moment and end up with contents nobody reviewed.
+//
+// The lines are re-priced from the products' CURRENT values rather than
+// carried over from the saved snapshot. That's the same rule the order
+// followed when it was first built (PROJECT_SPEC.md §6: the price at the
+// moment the product is added is what's copied in), and it's what makes a
+// draft picked up days later go out at today's prices instead of stale
+// ones. Nothing is locked until the draft is submitted.
+//
+// The booker who created the order is never reassigned by an edit.
+export async function updateDraftOrder({ orderId, customerId, remarks, items }) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { rows: existingRows } = await client.query('SELECT id, status FROM orders WHERE id = $1 FOR UPDATE', [
+      orderId,
+    ]);
+    const existing = existingRows[0];
+
+    if (!existing) {
+      throw new ApiError(404, 'Order not found.');
+    }
+    if (existing.status !== 'draft') {
+      throw new ApiError(409, `Only draft orders can be edited (this order is ${existing.status}).`);
+    }
+
+    const { lines, totals } = await buildOrderContents(client, { customerId, items });
+
+    // Replace rather than reconcile: the request carries the draft's full
+    // contents, so working out per-line inserts/updates/deletes would add
+    // moving parts without changing the result.
+    await client.query('DELETE FROM order_items WHERE order_id = $1', [orderId]);
+    await createOrderItems(orderId, lines, client);
+
+    const { rows } = await client.query(
+      `UPDATE orders
+       SET customer_id = $1, remarks = $2, subtotal = $3, discount_total = $4, total = $5
+       WHERE id = $6
+       RETURNING ${SELECT_FIELDS}`,
+      [customerId, remarks ?? null, totals.subtotal, totals.discountTotal, totals.total, orderId]
+    );
+
+    await client.query('COMMIT');
+    return rows[0];
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// Deletes a draft outright, along with its items (the order_items foreign
+// key cascades). This is the one order the application is allowed to
+// physically remove: submitted and cancelled orders are kept forever
+// (PROJECT_SPEC.md §12), which the status check below enforces.
+//
+// A deleted draft never had an order number, so nothing is orphaned and no
+// number is lost.
+export async function deleteDraftOrder(orderId) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { rows: existingRows } = await client.query(
+      `SELECT ${SELECT_FIELDS} FROM orders WHERE id = $1 FOR UPDATE`,
+      [orderId]
+    );
+    const existing = existingRows[0];
+
+    if (!existing) {
+      throw new ApiError(404, 'Order not found.');
+    }
+    if (existing.status !== 'draft') {
+      throw new ApiError(409, `Only draft orders can be deleted (this order is ${existing.status}). Submitted orders are kept permanently and can only be cancelled.`);
+    }
+
+    await client.query('DELETE FROM orders WHERE id = $1', [orderId]);
+
+    await client.query('COMMIT');
+    return existing;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// Draft -> Submitted (PROJECT_SPEC.md §13). The draft's final order number
+// is reserved and assigned in the same transaction as the status change, so
+// a failure rolls both back together and the reserved number is cleanly
+// reclaimed for the next caller (see reserveNextOrderNumber's doc comment).
+// `SELECT ... FOR UPDATE` also stops the same draft from being submitted
+// twice concurrently — two clicks can only ever produce one order number.
+//
+// The draft's stored line snapshots are what get locked in; submitting
+// doesn't re-price them. Re-pricing happens when a draft is edited (see
+// updateDraftOrder), which is what "Continue Draft" does.
 export async function submitOrder(orderId) {
   const client = await pool.connect();
   try {
@@ -40,10 +369,21 @@ export async function submitOrder(orderId) {
     const existing = existingRows[0];
 
     if (!existing) {
-      throw new Error('Order not found.');
+      throw new ApiError(404, 'Order not found.');
     }
     if (existing.status !== 'draft') {
-      throw new Error(`Only draft orders can be submitted (current status: ${existing.status}).`);
+      throw new ApiError(409, `Only draft orders can be submitted (this order is ${existing.status}).`);
+    }
+
+    // An order needs at least one product before it can be submitted
+    // (PROJECT_SPEC.md §26). A draft is allowed to be empty while it's
+    // being built; this is where that stops being acceptable.
+    const { rows: countRows } = await client.query(
+      'SELECT COUNT(*)::int AS n FROM order_items WHERE order_id = $1',
+      [orderId]
+    );
+    if (countRows[0].n === 0) {
+      throw new ApiError(400, 'Add at least one product before submitting this draft.');
     }
 
     const orderNumber = await reserveNextOrderNumber(client);
@@ -66,8 +406,19 @@ export async function submitOrder(orderId) {
   }
 }
 
-// Submitted -> Cancelled. The order number is never touched, so it is
-// retained on the cancelled order and never reused.
+// Submitted -> Cancelled (PROJECT_SPEC.md §15). The complete original order
+// is preserved: nothing is deleted, no line is touched, and the order
+// number stays exactly where it is, so a cancelled order keeps its identity
+// in history and that number is never reissued.
+//
+// Only a submitted order can be cancelled — a draft is deleted instead, and
+// cancelling twice is refused. `SELECT ... FOR UPDATE` holds the row for the
+// transaction so two simultaneous cancellations can't both record
+// themselves as the one that did it.
+//
+// `cancelled_at` and `cancelled_by` are stamped together with the status;
+// the database's check constraint would reject the row if any of the three
+// were missing (PROJECT_SPEC.md §33).
 export async function cancelOrder(orderId, cancelledByUserId) {
   const client = await pool.connect();
   try {
@@ -79,10 +430,13 @@ export async function cancelOrder(orderId, cancelledByUserId) {
     const existing = existingRows[0];
 
     if (!existing) {
-      throw new Error('Order not found.');
+      throw new ApiError(404, 'Order not found.');
+    }
+    if (existing.status === 'cancelled') {
+      throw new ApiError(409, 'This order has already been cancelled.');
     }
     if (existing.status !== 'submitted') {
-      throw new Error(`Only submitted orders can be cancelled (current status: ${existing.status}).`);
+      throw new ApiError(409, `Only submitted orders can be cancelled (this order is ${existing.status}). A draft is deleted rather than cancelled.`);
     }
 
     const { rows } = await client.query(
@@ -103,6 +457,10 @@ export async function cancelOrder(orderId, cancelledByUserId) {
   }
 }
 
+// Rows from listOrders()/findOrderDetailsById() carry joined customer and
+// booker columns; rows from the plain helpers don't. The nested objects are
+// added only when those columns are actually present, so one shaping
+// function serves both.
 export function toPublicOrder(order) {
   return {
     id: order.id,
@@ -119,5 +477,26 @@ export function toPublicOrder(order) {
     cancelledBy: order.cancelled_by,
     createdAt: order.created_at,
     updatedAt: order.updated_at,
+    ...(order.customer_name !== undefined && {
+      customer: {
+        id: order.customer_id,
+        name: order.customer_name,
+        code: order.customer_code,
+        phone: order.customer_phone,
+        address: order.customer_address,
+        cityArea: order.customer_city_area,
+      },
+    }),
+    ...(order.booker_name !== undefined && {
+      booker: {
+        id: order.booker_id,
+        name: order.booker_name,
+        username: order.booker_username,
+      },
+    }),
+    ...(order.cancelled_by_name !== undefined && {
+      cancelledByName: order.cancelled_by_name,
+    }),
+    ...(order.item_count !== undefined && { itemCount: order.item_count }),
   };
 }

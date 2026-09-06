@@ -1,16 +1,27 @@
 import { Router } from 'express';
+import multer from 'multer';
 import asyncHandler from '../utils/asyncHandler.js';
 import ApiError from '../utils/ApiError.js';
 import authenticate from '../middleware/authenticate.js';
 import {
+  bulkUpsertProducts,
   createProduct,
   deactivateProduct,
   findProductByCode,
   findProductById,
+  findProductsByCodes,
+  findProductsByNames,
+  listProductCompanies,
   listProducts,
   toPublicProduct,
   updateProduct,
 } from '../models/product.js';
+import {
+  buildSampleTemplate,
+  MAX_IMPORT_ROWS,
+  parseProductWorkbook,
+  validateImportRows,
+} from '../utils/productImport.js';
 
 const router = Router();
 
@@ -26,6 +37,54 @@ const FIELD_LIMITS = {
   packing: 100,
   unit: 50,
 };
+
+// Uploads are held in memory and parsed straight from the buffer: an
+// import is a few hundred kilobytes at most and is consumed immediately, so
+// writing it to disk would only add a file to clean up.
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+
+const ACCEPTED_EXTENSIONS = ['.xlsx', '.xls', '.csv'];
+
+// This limit is about the transfer; the cap on how many ROWS a sheet may
+// contain lives with the parser (MAX_IMPORT_ROWS).
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_UPLOAD_BYTES, files: 1 },
+  fileFilter: (req, file, cb) => {
+    const name = (file.originalname || '').toLowerCase();
+    if (!ACCEPTED_EXTENSIONS.some((extension) => name.endsWith(extension))) {
+      // Rejected by name rather than by MIME type: browsers and operating
+      // systems disagree wildly about what to call a .xlsx, and the parser
+      // sniffs the actual format anyway.
+      cb(new ApiError(400, `Upload a ${ACCEPTED_EXTENSIONS.join(', ')} file.`));
+      return;
+    }
+    cb(null, true);
+  },
+}).single('file');
+
+// multer reports its own failures through the callback rather than by
+// throwing, so it is wrapped to turn them into the same ApiError shape
+// every other route produces.
+function receiveUpload(req, res) {
+  return new Promise((resolve, reject) => {
+    upload(req, res, (err) => {
+      if (!err) {
+        resolve();
+        return;
+      }
+      if (err instanceof ApiError) {
+        reject(err);
+      } else if (err.code === 'LIMIT_FILE_SIZE') {
+        reject(new ApiError(400, `The file is too large — the limit is ${MAX_UPLOAD_BYTES / (1024 * 1024)}MB.`));
+      } else if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+        reject(new ApiError(400, 'Send the spreadsheet as a single file in the "file" field.'));
+      } else {
+        reject(new ApiError(400, `The upload could not be read: ${err.message}`));
+      }
+    });
+  });
+}
 
 function requireValidId(id) {
   if (!UUID_RE.test(id)) {
@@ -246,17 +305,302 @@ router.get(
 
     const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
 
-    const { rows, total } = await listProducts({ search: search || undefined, isActive, page, limit });
+    // `ids` fetches a known set of products in one go (comma-separated).
+    // Capped at the same ceiling as an order's line count, since that is
+    // what it exists for — reloading a saved draft's products.
+    let ids;
+    if (req.query.ids !== undefined) {
+      if (typeof req.query.ids !== 'string') {
+        throw new ApiError(400, 'ids must be a comma-separated list of product ids.');
+      }
+      ids = req.query.ids
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean);
+
+      if (ids.length === 0 || ids.length > 200) {
+        throw new ApiError(400, 'ids must list between 1 and 200 product ids.');
+      }
+      if (ids.some((value) => !UUID_RE.test(value))) {
+        throw new ApiError(400, 'ids must contain only valid product ids.');
+      }
+    }
+
+    // An `ids` lookup asks for a known set, so it returns that whole set
+    // rather than being clipped by the normal page size.
+    const effectiveLimit = ids ? ids.length : limit;
+
+    const { rows, total } = await listProducts({
+      search: search || undefined,
+      isActive,
+      ids,
+      page: ids ? 1 : page,
+      limit: effectiveLimit,
+    });
 
     res.json({
       products: rows.map(toPublicProduct),
       pagination: {
-        page,
-        limit,
+        page: ids ? 1 : page,
+        limit: effectiveLimit,
         total,
-        totalPages: Math.max(Math.ceil(total / limit), 1),
+        totalPages: Math.max(Math.ceil(total / effectiveLimit), 1),
       },
     });
+  })
+);
+
+// Downloads the sample import template: the correct columns, two worked
+// example rows, and an Instructions sheet explaining every field. Declared
+// before '/:id' so the path isn't taken for a product id.
+router.get(
+  '/sample-template',
+  asyncHandler(async (req, res) => {
+    const workbook = buildSampleTemplate();
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="product-import-template.xlsx"');
+    res.setHeader('Content-Length', workbook.length);
+    res.send(workbook);
+  })
+);
+
+// Reads an uploaded file and works out exactly what importing it would do,
+// without doing any of it. Both endpoints go through this, so a file that
+// validates clean cannot then behave differently on upload.
+async function inspectUpload(req, res) {
+  await receiveUpload(req, res);
+
+  if (!req.file) {
+    throw new ApiError(400, 'Attach a .xlsx or .csv file.');
+  }
+
+  let parsed;
+  try {
+    parsed = parseProductWorkbook(req.file.buffer);
+  } catch (err) {
+    // A file that can't be read at all is a bad request, not a crash.
+    throw new ApiError(400, err.message);
+  }
+
+  if (parsed.rows.length === 0) {
+    throw new ApiError(400, 'The sheet has no product rows.');
+  }
+
+  // Two queries for the whole file rather than a lookup per row: the codes
+  // it names, and the names it uses. A row matches an existing product by
+  // code when it gives one, and by name when it doesn't.
+  //
+  // Codes are compared exactly, matching the case-sensitive UNIQUE
+  // constraint and the Add Product form; names are compared
+  // case-insensitively, since a product name is prose rather than a key.
+  const providedCodes = parsed.rows.map((row) => String(row.cells.code ?? '').trim()).filter(Boolean);
+  const providedNames = parsed.rows.map((row) => String(row.cells.name ?? '').trim()).filter(Boolean);
+
+  const [byCode, byName] = await Promise.all([
+    findProductsByCodes(providedCodes),
+    findProductsByNames(providedNames),
+  ]);
+
+  const productsByCode = new Map(byCode.map((product) => [product.code, product]));
+  const productsByName = new Map();
+  for (const product of byName) {
+    const key = product.name.toLowerCase();
+    if (!productsByName.has(key)) productsByName.set(key, []);
+    productsByName.get(key).push(product);
+  }
+
+  const { errors, inserts, updates } = validateImportRows(parsed.rows, { productsByCode, productsByName });
+
+  // Second gate: the import's rules are looser than the Add Product form's,
+  // but what they produce must still be something the product API would
+  // accept — so nothing can reach the database that the app itself would
+  // have rejected. Inserts are checked whole; an update is checked as the
+  // product it WILL BE once the patch is applied, which is what actually
+  // has to satisfy the table's constraints.
+  const finalErrors = [...errors];
+  const acceptedInserts = [];
+  const acceptedUpdates = [];
+
+  for (const row of inserts) {
+    // A generated code is assigned at insert time, so stand one in purely
+    // for this check — it is never the value that gets stored.
+    const candidate = { ...row.payload, code: row.payload.code ?? 'GENERATED-AT-INSERT' };
+    const { errors: schemaErrors } = validateProductPayload(candidate, { partial: false });
+    if (schemaErrors.length > 0) {
+      finalErrors.push(...schemaErrors.map((message) => ({ row: row.row, field: 'Row', message })));
+    } else {
+      acceptedInserts.push(row);
+    }
+  }
+
+  for (const row of updates) {
+    const merged = {
+      name: row.patch.name ?? row.existing.name,
+      code: row.existing.code,
+      company: 'company' in row.patch ? row.patch.company : row.existing.company,
+      packing: 'packing' in row.patch ? row.patch.packing : row.existing.packing,
+      unit: 'unit' in row.patch ? row.patch.unit : row.existing.unit,
+      mrp: 'mrp' in row.patch ? row.patch.mrp : Number(row.existing.mrp),
+      salePrice: 'salePrice' in row.patch ? row.patch.salePrice : Number(row.existing.sale_price),
+      discount: 'discount' in row.patch ? row.patch.discount : Number(row.existing.discount),
+      schemeEnabled: 'schemeEnabled' in row.patch ? row.patch.schemeEnabled : row.existing.scheme_enabled,
+      schemePurchaseQty:
+        'schemePurchaseQty' in row.patch ? row.patch.schemePurchaseQty : row.existing.scheme_purchase_qty,
+      schemeBonusQty: 'schemeBonusQty' in row.patch ? row.patch.schemeBonusQty : row.existing.scheme_bonus_qty,
+    };
+    const { errors: schemaErrors } = validateProductPayload(merged, { partial: false });
+    if (schemaErrors.length > 0) {
+      finalErrors.push(...schemaErrors.map((message) => ({ row: row.row, field: 'Row', message })));
+    } else {
+      acceptedUpdates.push(row);
+    }
+  }
+
+  finalErrors.sort((a, b) => a.row - b.row);
+
+  return {
+    totalRows: parsed.rows.length,
+    unmappedHeaders: parsed.unmappedHeaders,
+    errors: finalErrors,
+    inserts: acceptedInserts,
+    updates: acceptedUpdates,
+  };
+}
+
+// Summarises what an import would do, for the response body.
+function summarise({ totalRows, inserts, updates }) {
+  return {
+    totalRows,
+    validRows: inserts.length + updates.length,
+    invalidRows: totalRows - inserts.length - updates.length,
+    newProducts: inserts.length,
+    updatedProducts: updates.length,
+    generatedCodes: inserts.filter((row) => !row.payload.code).length,
+  };
+}
+
+// Describes an upsert in a sentence, so the UI doesn't have to assemble one.
+function describe(summary) {
+  const parts = [];
+  if (summary.newProducts > 0) {
+    parts.push(`${summary.newProducts} new product${summary.newProducts === 1 ? '' : 's'}`);
+  }
+  if (summary.updatedProducts > 0) {
+    parts.push(`${summary.updatedProducts} existing product${summary.updatedProducts === 1 ? '' : 's'} to update`);
+  }
+  return parts.length > 0 ? parts.join(' and ') : 'nothing to do';
+}
+
+// Checks a file without writing anything.
+//
+// This is the first half of a two-step import: the booker tests the file,
+// fixes whatever is reported, and only then uploads. Nothing here touches
+// the database beyond reading the products the file refers to.
+router.post(
+  '/validate-bulk',
+  asyncHandler(async (req, res) => {
+    const inspection = await inspectUpload(req, res);
+    const summary = summarise(inspection);
+
+    res.json({
+      isValid: inspection.errors.length === 0,
+      summary,
+      unmappedHeaders: inspection.unmappedHeaders,
+      errors: inspection.errors,
+      // Which existing products would change, and how they were matched, so
+      // the user can see an update is aimed where they expect before it
+      // happens.
+      updates: inspection.updates.map((row) => ({
+        row: row.row,
+        code: row.code,
+        name: row.existing.name,
+        matchedBy: row.matchedBy,
+        changes: Object.keys(row.patch),
+      })),
+      message:
+        inspection.errors.length === 0
+          ? `All ${summary.totalRows} row${summary.totalRows === 1 ? '' : 's'} look good — ${describe(summary)}.${
+              summary.generatedCodes > 0
+                ? ` ${summary.generatedCodes} product code${summary.generatedCodes === 1 ? ' will be' : 's will be'} generated automatically.`
+                : ''
+            }`
+          : `${summary.invalidRows} of ${summary.totalRows} rows need fixing before this file can be imported.`,
+    });
+  })
+);
+
+// Imports the file: new products inserted, matching ones updated, in a
+// single transaction. Runs exactly the checks validate-bulk ran — the
+// client is never trusted to have called it.
+//
+// Refuses outright if anything is wrong (422), so an import is all-or-
+// nothing: a spreadsheet is meant to be correct, and half-applying one
+// leaves the user to work out what did and didn't land. `validate-bulk`
+// exists precisely so this refusal is never a surprise.
+router.post(
+  '/bulk-upload',
+  asyncHandler(async (req, res) => {
+    const inspection = await inspectUpload(req, res);
+    const summary = summarise(inspection);
+
+    if (inspection.errors.length > 0) {
+      // Nothing has been written — the upsert below hasn't run.
+      return res.status(422).json({
+        isValid: false,
+        imported: 0,
+        updated: 0,
+        summary,
+        unmappedHeaders: inspection.unmappedHeaders,
+        errors: inspection.errors,
+        message: 'Nothing was imported. Fix the rows listed below and upload the file again.',
+      });
+    }
+
+    let result;
+    try {
+      result = await bulkUpsertProducts({
+        inserts: inspection.inserts.map((row) => ({ ...row.payload })),
+        updates: inspection.updates.map((row) => ({ productId: row.productId, patch: row.patch })),
+      });
+    } catch (err) {
+      // The unique index is the last word on codes: another import may have
+      // claimed one between the check above and this write.
+      if (err.code === '23505') {
+        throw new ApiError(
+          409,
+          'A product code in this file was taken by someone else while the import was running. Nothing was imported — please upload the file again.'
+        );
+      }
+      throw err;
+    }
+
+    res.status(201).json({
+      isValid: true,
+      imported: result.inserted.length,
+      updated: result.updated.length,
+      summary,
+      unmappedHeaders: inspection.unmappedHeaders,
+      errors: [],
+      products: [...result.inserted, ...result.updated].map(toPublicProduct),
+      message: `Imported ${result.inserted.length} new product${
+        result.inserted.length === 1 ? '' : 's'
+      } and updated ${result.updated.length} existing one${result.updated.length === 1 ? '' : 's'}.${
+        summary.generatedCodes > 0
+          ? ` ${summary.generatedCodes} code${summary.generatedCodes === 1 ? ' was' : 's were'} generated.`
+          : ''
+      }`,
+    });
+  })
+);
+
+// Declared before '/:id' — otherwise that route matches 'companies' and
+// tries to look it up as a product id.
+router.get(
+  '/companies',
+  asyncHandler(async (req, res) => {
+    const companies = await listProductCompanies();
+    res.json({ companies });
   })
 );
 

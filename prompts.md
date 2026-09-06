@@ -1,54 +1,17 @@
-Read `PROJECT_SPEC.md` and continue from the completed Stages 1–4.
+Update the Bulk Product Import logic to support "Upsert" (Update existing products and insert new ones):
 
-Implement **Stage 5 — Step 1: Order Database & Historical Snapshots** only.
+1. Matching & Update Logic (Backend):
+   - When processing Excel/CSV rows in POST /api/products/validate-bulk and POST /api/products/bulk-upload:
+     * Match existing products using Product Code (if provided) OR exact Product Name (case-insensitive).
+     * If a match is found: Update the existing product's fields (especially Company/Manufacturer, MRP, Sale Price, Discount, Schemes) instead of creating a duplicate row.
+     * If no match is found: Create/Insert as a new product (auto-generating Product Code if missing).
 
-Build the database foundation for:
+2. Validation & Summary Enhancements:
+   - Update the "Test / Validate File" summary response to show a breakdown:
+     * Total Rows Processed
+     * New Products to be Inserted
+     * Existing Products to be Updated
+   - Ensure the validation step verifies that rows matching existing products won't violate database constraints.
 
-* Orders
-* Order Items
-
-Requirements:
-
-* Order belongs to a Customer.
-* Order is created by the logged-in Booker/User.
-* Order status: Draft, Submitted, Cancelled.
-* Support multiple orders for the same customer on the same day.
-* Use UUID primary keys and proper foreign keys/indexes.
-* Store order date/time, remarks, totals and timestamps.
-* Order Item must preserve historical commercial values at order time:
-
-  * Product ID
-  * Product name/code where useful
-  * MRP
-  * Sale Price/Rate
-  * Discount
-  * Paid Quantity
-  * Bonus Quantity
-  * Scheme Purchase Qty
-  * Scheme Bonus Qty
-  * Line subtotal
-  * Line discount
-  * Line total
-* Historical values must remain unchanged if the Product's price, discount or scheme changes later.
-* Bonus quantity has zero sales value.
-* Drafts are editable and do not count as sales.
-* Submitted orders cannot be edited.
-* Cancelled orders remain stored and never count as sales.
-* Do NOT build Order UI yet.
-* Do NOT build Sales Reports, Targets, Stock, Areas or other modules.
-
-Create the migration(s), models and database constraints needed for this step.
-
-Test:
-
-* Foreign keys
-* Required fields
-* Status constraints
-* Quantity/amount validation
-* Historical snapshot fields
-* Draft/Submitted/Cancelled data integrity
-* Migration up/down
-
-Give me a short report.
-
-**STOP after Stage 5 Step 1.**
+3. Frontend Modal Update:
+   - In ProductList.jsx import modal, display the updated test summary showing how many new products will be added and how many existing products will have their details (like Company Name) updated.

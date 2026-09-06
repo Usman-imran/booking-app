@@ -5,7 +5,6 @@ const NAV_ITEMS = [
   { to: '/', label: 'Dashboard', end: true },
   { to: '/customers', label: 'Customers' },
   { to: '/products', label: 'Products' },
-  { to: '/prices', label: 'Prices' },
   { to: '/orders/new', label: 'Create Order' },
   { to: '/orders/drafts', label: 'Draft Orders' },
   { to: '/orders', label: 'Orders' },

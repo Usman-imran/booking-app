@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import ProductForm from './ProductForm.jsx';
 import { getProduct, updateProduct } from '../../api/products.js';
@@ -10,28 +10,25 @@ export default function EditProduct() {
   const [status, setStatus] = useState('loading');
   const [error, setError] = useState(null);
 
-  useEffect(() => {
-    let cancelled = false;
+  // Lifted out of the effect so the error state can offer a Retry rather
+  // than leaving a browser reload as the only way forward.
+  const fetchProduct = useCallback(() => {
     setStatus('loading');
-
-    getProduct(id)
+    setError(null);
+    return getProduct(id)
       .then((data) => {
-        if (!cancelled) {
-          setProduct(data.product);
-          setStatus('ready');
-        }
+        setProduct(data.product);
+        setStatus('ready');
       })
       .catch((err) => {
-        if (!cancelled) {
-          setError(err.message);
-          setStatus('error');
-        }
+        setError(err.message);
+        setStatus('error');
       });
-
-    return () => {
-      cancelled = true;
-    };
   }, [id]);
+
+  useEffect(() => {
+    fetchProduct();
+  }, [fetchProduct]);
 
   async function handleSubmit(values) {
     await updateProduct(id, values);
@@ -46,7 +43,14 @@ export default function EditProduct() {
     return (
       <div className="page-placeholder">
         <p>Could not load product: {error}</p>
-        <Link to="/products">Back to Products</Link>
+        <div className="form-actions">
+          <Link to="/products" className="btn-secondary">
+            Back to Products
+          </Link>
+          <button type="button" className="btn-primary" onClick={fetchProduct}>
+            Retry
+          </button>
+        </div>
       </div>
     );
   }

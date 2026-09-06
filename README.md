@@ -12,9 +12,19 @@ See [`PROJECT_SPEC.md`](./PROJECT_SPEC.md) for the full product and technical sp
 
 **Stage 3 — Customers: complete.** The `customers` table exists (see `PROJECT_SPEC.md` §4), a full REST API is available at `/api/customers` (create, list/search/filter/paginate, get, update, deactivate — all behind authentication), and there's a full UI for it: a searchable/filterable/paginated list, add/edit forms, a details view, and deactivate/reactivate with a confirmation dialog. Verified end-to-end from a clean database, including a fix for a pagination edge case (deactivating/reactivating the last row on a page no longer strands the list on an empty "no results" page — it now snaps back to a valid page). Stage 1/2 features (health checks, migrations, login/auth) were re-confirmed unaffected. Order history, total-orders and total-sales still don't appear anywhere — they depend on the Orders module, not built yet.
 
-**Stage 4 — Products & Pricing: complete.** The `products` table exists (see `PROJECT_SPEC.md` §5, §7, §8), a full REST API is available at `/api/products`, and there's a full UI for it: a searchable/filterable/paginated list (with MRP, Sale Price, Discount, and scheme shown per row), add/edit forms with a Pricing section and a Bonus Scheme toggle that shows a live "20 + 2"-style example, a details view, and deactivate/reactivate with a confirmation dialog. Re-verified end-to-end from a clean database, including a fix for a validation gap (explicit `null` for `mrp`/`salePrice`/`discount` was silently coerced to `0` instead of being rejected — a quirk of `Number(null) === 0` in JavaScript). Authentication, Customer, and prior-stage functionality were all re-confirmed unaffected by full regression runs. There is no separate bulk "Prices" page — pricing is managed as part of each product's form, since the step's requirements scoped "Prices" to fields on the product itself; `/prices` in the sidebar remains a placeholder for a possible future bulk-editing screen.
+**Stage 4 — Products & Pricing: complete.** The `products` table exists (see `PROJECT_SPEC.md` §5, §7, §8), a full REST API is available at `/api/products`, and there's a full UI for it: a searchable/filterable/paginated list (with MRP, Sale Price, Discount, and scheme shown per row), add/edit forms with a Pricing section and a Bonus Scheme toggle that shows a live "20 + 2"-style example, a details view, and deactivate/reactivate with a confirmation dialog. Re-verified end-to-end from a clean database, including a fix for a validation gap (explicit `null` for `mrp`/`salePrice`/`discount` was silently coerced to `0` instead of being rejected — a quirk of `Number(null) === 0` in JavaScript). Authentication, Customer, and prior-stage functionality were all re-confirmed unaffected by full regression runs. There is no separate bulk "Prices" page — pricing is managed as part of each product's form, since the step's requirements scoped "Prices" to fields on the product itself. The `/prices` route and its sidebar link were removed entirely once the rest of the application was finished, rather than left as a placeholder for a screen that isn't planned.
 
-**Stage 5 — Orders: in progress (Step 1 + Order Numbering done).** The `orders` and `order_items` tables exist (see `PROJECT_SPEC.md` §10–§17, §26, §34): an order belongs to a customer and a booker, has a `draft`/`submitted`/`cancelled` status enforced by a DB-level state machine (each status requires an exact, consistent combination of `order_number`/`submitted_at`/`cancelled_at`/`cancelled_by`), and every order item is a full historical snapshot (product name/code, MRP, rate, discount, paid/bonus quantities, the scheme that applied, and the computed line amounts) that a later product/price/discount/scheme change can never alter. The `ORD-YYYYMMDD-XXX` order numbering system (§11) is implemented and tested: `submitOrder()`/`cancelOrder()` in `backend/src/models/order.js`, backed by a concurrency-safe daily counter in `backend/src/utils/orderNumber.js` — see [Order Numbering](#order-numbering) below. No Order API or UI yet — `submitOrder`/`cancelOrder` are model-layer functions only, not exposed as routes.
+**Stage 5 — Order Booking Engine: complete.** The `orders` and `order_items` tables exist (see `PROJECT_SPEC.md` §10–§17, §26, §34): an order belongs to a customer and a booker, has a `draft`/`submitted`/`cancelled` status enforced by a DB-level state machine (each status requires an exact, consistent combination of `order_number`/`submitted_at`/`cancelled_at`/`cancelled_by`), and every order item is a full historical snapshot (product name/code, MRP, rate, discount, paid/bonus quantities, the scheme that applied, and the computed line amounts) that a later product/price/discount/scheme change can never alter. The `ORD-YYYYMMDD-XXX` order numbering system (§11) is implemented and tested — see [Order Numbering](#order-numbering). On top of that, the Order API is now live at `/api/orders`: create an order or save it as a draft, list/search/filter orders, and fetch full order details, with prices, discounts, bonus quantities and totals all calculated server-side and written in a single atomic transaction — see [Orders API](#orders-api). Verified end-to-end against a real PostgreSQL database with 206 automated checks (including 12 concurrent submissions producing unique, contiguous order numbers), plus a regression pass over Stage 1–4 functionality. The Create Order screen is live at `/orders/new` — a searchable customer picker, a fast product search that adds lines with one click or the Enter key, live line totals/discounts/bonus quantities, an Order Summary with remarks, and Save as Draft / Submit Order (see [Create Order UI](#create-order-ui)). The screen's live preview was checked against the backend's own calculation over 20,983 combinations of price, discount, scheme and quantity — they agree exactly, so what the booker reviews is what gets stored. Viewing, editing, cancelling and deleting existing orders (`PROJECT_SPEC.md` §13–§15, §17) still have no UI, and `submitOrder`/`cancelOrder` remain model-layer only — those belong to Stages 6/7.
+
+**Stage 6 — Draft Orders: complete.** Drafts are now a full workflow, not just a status. `/orders/drafts` lists every saved draft with its customer, booker, item count, total and remarks, and each row offers View, Continue, Submit and Delete (`PROJECT_SPEC.md` §13). Continuing a draft reopens it in the Create Order screen with its customer, items and remarks loaded back in and **every line re-priced at today's values**, with a banner naming anything that changed since it was saved; submitting a draft assigns the final `ORD-YYYYMMDD-XXX` number and makes the order permanent. Backed by three new endpoints — `PUT /api/orders/:id`, `POST /api/orders/:id/submit`, `DELETE /api/orders/:id` — plus an `ids` filter on the products list so a draft's lines reload in one request. Verified with 115 automated checks against a real database (including 6 concurrent submissions of the same draft producing exactly one order number) and a 32-check walk of the UI's own request sequence against the running dev server; Stage 5's 206 checks and the 20,983-case calculation parity check were re-run and still pass. Cancelling a submitted order and the full Orders module (§15, §17) are still Stage 7.
+
+**Stage 7 — Orders & Cancellation: complete.** The Orders module is live at `/orders`: submitted and cancelled orders in one searchable, paginated list with Date-range, Customer, Booker and Status filters (all combinable) plus a Today's Orders shortcut, and a single Order Details view at `/orders/:id` that serves drafts, submitted and cancelled orders alike — showing only the actions each status actually permits. Cancellation (`POST /api/orders/:id/cancel`, `PROJECT_SPEC.md` §15) marks a submitted order cancelled with `cancelled_at` and `cancelled_by` while keeping the order intact — every line, its totals and its order number stay exactly as they were, and that number is never reissued. **Strict locking is enforced at the API, not just hidden in the UI**: there is no route anywhere that edits a submitted order, and `PUT`/`DELETE`/`submit` all return `409` for one. Draft, Submitted and Cancelled each get a distinct badge from one shared component, and cancelled rows are struck through so they can't be mistaken for orders that count. Verified with 81 automated checks (including 5 concurrent cancellations of one order resolving to exactly one recorded cancellation) plus a 41-check walk of the UI's request sequence; all of Stages 5-6 (353 checks and the 20,983-case parity check) re-run and still pass. Sales Reports, the Dashboard and Targets — which are where excluding cancelled orders actually starts to matter — are Stages 8-10.
+
+**Stage 8 — Sales Reports: complete.** `/reports` presents all six reports §18 requires as tabs — Daily, Monthly, Customer-wise, Product-wise, Booker-wise and Date Range — over a shared date-range filter with Today / This Month / This Year / All Time presets, and a totals strip (valid orders, gross, discount, net sales, paid qty, bonus qty) that always covers the whole period rather than the visible page. All of it is computed by `backend/src/models/report.js`, which is the **single definition of a valid sale** §34 demands: only `submitted` orders count, drafts and cancelled orders are excluded, bonus quantities carry zero value, and line discounts are already deducted. No sales arithmetic exists anywhere on the client. Verified with 128 automated checks aimed squarely at those rules — including cancelling an order and watching its value leave the totals, a scheme granting 100 free units adding nothing to sales, and every report summing to the identical figure — plus a 37-check walk of the page's request sequence against live data. Stages 5-7 (430 checks) and the 20,983-case parity check were re-run and still pass. Targets (§19) and the Dashboard (§3) are Stages 9-10; both will read their figures from this same module.
+
+**Stage 9 — Targets: complete, with company-wise targets.** `/targets` sets and reviews monthly targets (§19) at two scopes: the month **overall**, and per **manufacturer** — an approved extension to the original overall-only target, written into `PROJECT_SPEC.md` §19 per the change-management rule in §42. Progress cards and a table show Target, Achieved, Remaining, Achievement % and Status for each scope, and manufacturers that sold this month without a target are listed too, so a missing target is visible rather than invisible. Achieved never leaves `backend/src/models/report.js` — the same valid-sales definition Sales Reports use (§34) — so a target and a sales report can't disagree about the same month; a test asserts the two match to the paisa. Zero targets are handled as §19 demands: the percentage is `null`, never `NaN` or `Infinity`. New `monthly_targets` table plus `GET/POST/PUT /api/targets`, `PUT/DELETE /api/targets/:id` and `GET /api/products/companies`. Verified with 131 automated checks and a 41-check walk of the page's request sequence; Stages 5-8 (561 checks, 110 UI-flow checks) and the 20,983-case parity check re-run and still pass. The Dashboard (§3) is Stage 10 and will read the same module.
+
+**Stage 10 — Dashboard, UI Polish & QA: complete.** The Dashboard is live at `/` with the operational overview §3 asks for: today's orders and sales, this month's orders and sales, the monthly target with achieved / remaining / achievement %, the draft-order count, recent orders, and Quick Actions for Create Order, Customers, Products and Orders. `GET /api/dashboard` computes **nothing of its own** — every figure is assembled from `report.js`, `target.js` and `order.js`, so §34's "do not implement separate formulas for each screen" holds by construction rather than by discipline; tests assert the Dashboard matches Sales Reports and Targets to the paisa, including after a cancellation. The polish pass added a React error boundary, a real 404 page, a responsive shell (the sidebar becomes a scrolling strip below 900px), and a Retry action on the five load-error screens that had none. Verified with 80 new automated checks; the whole suite — **741 backend checks across Stages 5-10, 185 live UI-flow checks, and the 20,983-case calculation parity check** — passes.
 
 ## Project Structure
 
@@ -25,19 +35,19 @@ order-booking-app/
 │   ├── src/
 │   │   ├── config/     Configuration (PostgreSQL pool, connection test)
 │   │   ├── middleware/ Centralized error/404 handling, JWT authentication
-│   │   ├── models/     Plain SQL data-access functions (user.js, customer.js, product.js, order.js, orderItem.js)
+│   │   ├── models/     Plain SQL data-access functions (user.js, customer.js, product.js, order.js, orderItem.js, report.js, target.js)
 │   │   ├── routes/     Express route modules (index.js aggregates them under /api)
-│   │   ├── utils/      ApiError, asyncHandler, password hashing, JWT signing, order numbering
+│   │   ├── utils/      ApiError, asyncHandler, password hashing, JWT signing, order numbering, order pricing, product import
 │   │   ├── app.js      Express app setup
 │   │   └── server.js   Entry point
 │   ├── .node-pg-migraterc
 │   └── .env.example
 ├── frontend/           React app (Vite)
 │   ├── src/
-│   │   ├── api/        Reusable API client (fetch wrapper, carries the auth token) + customers.js, products.js
+│   │   ├── api/        Reusable API client (fetch wrapper, carries the auth token) + customers.js, products.js, orders.js, users.js, reports.js, targets.js
 │   │   ├── auth/       AuthContext (session state, login/logout, hydration on refresh)
-│   │   ├── components/ Shared UI (layout, nav, placeholders, ProtectedRoute, ConfirmDialog)
-│   │   ├── pages/      Login, Dashboard, pages/customers/, pages/products/ (list, add, edit, details)
+│   │   ├── components/ Shared UI (layout, nav, ProtectedRoute, ConfirmDialog, ErrorBoundary)
+│   │   ├── pages/      Login, Dashboard, pages/customers/, pages/products/, pages/orders/, pages/reports/, pages/targets/
 │   │   ├── App.jsx     Route definitions
 │   │   └── main.jsx    Entry point
 │   └── .env.example
@@ -117,16 +127,18 @@ Migrations applied so far:
 - `customers` table (id, name, code, contact_person, phone, alternate_phone, address, city_area, customer_type, is_active, created_at, updated_at — `PROJECT_SPEC.md` §4), unique code, indexes on `name` and `is_active`, `updated_at` auto-update trigger.
 - `products` table (id, name, code, company, packing, unit, mrp, sale_price, discount, scheme_enabled, scheme_purchase_qty, scheme_bonus_qty, is_active, created_at, updated_at — `PROJECT_SPEC.md` §5/§7/§8), unique code, `mrp`/`sale_price` non-negative, `discount` a 0–100 percentage, and a table-level check that a product with `scheme_enabled = true` must have `scheme_purchase_qty > 0` and `scheme_bonus_qty >= 0` (both explicitly non-null — a scheme can't be "enabled" with missing quantities). Indexes on `name`, `company`, and `is_active`.
 - `orders` table (id, order_number, customer_id, booker_id, status, remarks, subtotal, discount_total, total, submitted_at, cancelled_at, cancelled_by, created_at, updated_at — `PROJECT_SPEC.md` §10–§17). `customer_id`/`booker_id` are `NOT NULL` foreign keys (`ON DELETE RESTRICT` — a customer or booker can't be hard-deleted while referenced); indexes on both plus `status`. `order_number` is `ORD-YYYYMMDD-XXX`-formatted and unique when present. A single check constraint enforces the whole status state machine: `draft` ⇒ no `order_number` and no submitted/cancelled timestamps; `submitted` ⇒ has an `order_number` and `submitted_at`, nothing cancelled; `cancelled` ⇒ has all of `order_number`, `submitted_at`, `cancelled_at`, and `cancelled_by`. Another check keeps `total = subtotal - discount_total`.
-- `order_items` table (id, order_id, product_id, product_name, product_code, mrp, rate, discount, paid_qty, bonus_qty, scheme_purchase_qty, scheme_bonus_qty, line_subtotal, line_discount, line_total, created_at, updated_at — `PROJECT_SPEC.md` §16). `order_id` cascades on delete (so deleting a draft cleans up its items); `product_id` is `ON DELETE RESTRICT`. Every commercial column here is a **snapshot taken at order time** — changing the product's price, discount, or scheme afterward never touches existing order items (verified directly: changed a product's price/discount/scheme after creating an order item referencing it, and the item was unaffected). `line_total = line_subtotal - line_discount` is enforced by a check constraint, as is the scheme snapshot being both-or-neither (`scheme_purchase_qty`/`scheme_bonus_qty`). Schema only — no Order API/UI yet.
+- `order_items` table (id, order_id, product_id, product_name, product_code, mrp, rate, discount, paid_qty, bonus_qty, scheme_purchase_qty, scheme_bonus_qty, line_subtotal, line_discount, line_total, created_at, updated_at — `PROJECT_SPEC.md` §16). `order_id` cascades on delete (so deleting a draft cleans up its items); `product_id` is `ON DELETE RESTRICT`. Every commercial column here is a **snapshot taken at order time** — changing the product's price, discount, or scheme afterward never touches existing order items (verified directly: changed a product's price/discount/scheme after creating an order item referencing it, and the item was unaffected). `line_total = line_subtotal - line_discount` is enforced by a check constraint, as is the scheme snapshot being both-or-neither (`scheme_purchase_qty`/`scheme_bonus_qty`). Written by the Order API — see [Orders API](#orders-api).
 - `order_number_counters` table (`counter_date` primary key, `last_sequence`) — one row per calendar day, backing the order numbering system below.
 
-Other business tables (reports/targets are computed from orders, not separate tables) are added in later stages.
+- `monthly_targets` table (id, year, month, company, target_amount, created_at, updated_at — `PROJECT_SPEC.md` §19). `company` NULL is the month's overall target; a value scopes it to that manufacturer. A unique index on `(year, month, lower(coalesce(company, '')))` allows exactly one target per month per scope — `COALESCE` so NULLs don't count as distinct, `lower` so `GSK` and `gsk` can't become two targets for the same sales. Manufacturer is free text matched against `products.company`, not a foreign key: companies aren't an entity in this application.
+
+Sales figures are computed from orders rather than stored, so there is no reports table.
 
 You can also check DB connectivity through the running API: `curl http://localhost:5000/api/health/db`.
 
 ## Order Numbering
 
-`ORD-YYYYMMDD-XXX` (e.g. `ORD-20260905-001`), per `PROJECT_SPEC.md` §11. There is no API/route for this yet — it's implemented at the model layer, ready for the Order API to call in a later step.
+`ORD-YYYYMMDD-XXX` (e.g. `ORD-20260905-001`), per `PROJECT_SPEC.md` §11. `POST /api/orders` uses this whenever it creates a submitted order (see [Orders API](#orders-api)); `submitOrder()`/`cancelOrder()` are the model-layer transitions for an order that already exists, and don't have routes yet.
 
 - **`backend/src/utils/orderNumber.js`** — `reserveNextOrderNumber(client)` does the actual generation: one atomic `INSERT ... ON CONFLICT (counter_date) DO UPDATE SET last_sequence = last_sequence + 1` against `order_number_counters`, using the database's own `CURRENT_DATE` (no app-side timezone math). A fresh date has no row, so it starts at 1 — that's the entire "daily reset." A generated number over 999 (the format's 3-digit limit) throws instead of producing a malformed number.
 - **Concurrency safety**: the UPSERT takes a row lock on that day's counter row for the life of the caller's transaction. A second concurrent caller for the same day simply waits for the first to commit or roll back, then proceeds from the true, correct value — no duplicates, no races.
@@ -179,12 +191,93 @@ Under `frontend/src/pages/customers/`, all behind the existing login/`ProtectedR
 All endpoints are under `/api/products` and require `Authorization: Bearer <token>`. Fields: `name`, `code` (unique), `company`, `packing`, `unit`, `mrp`, `salePrice`, `discount` (0–100, defaults to 0), `schemeEnabled`, `schemePurchaseQty`, `schemeBonusQty`, `isActive` (see `PROJECT_SPEC.md` §5/§7/§8).
 
 - `POST /api/products` — create. `name`, `code`, `mrp`, and `salePrice` are required; `mrp`/`salePrice` must be non-negative numbers; `code` must be unique (`409` on conflict). Always created active.
-- `GET /api/products` — list, paginated (`page`, `limit`, default 20 / max 100), sorted by name. `search` matches `name`, `code`, or `company` (case-insensitive, partial); `isActive` (`true`/`false`) filters status.
+- `GET /api/products` — list, paginated (`page`, `limit`, default 20 / max 100), sorted by name. `search` matches `name`, `code`, or `company` (case-insensitive, partial); `isActive` (`true`/`false`) filters status. `ids` (comma-separated, 1–200) fetches exactly those products and returns the whole set rather than a page — it exists so reopening a saved draft can re-price every line in one request instead of one request per line. Inactive products are still returned by `ids`, flagged `isActive: false`, so the caller can tell the difference between "deactivated" and "gone".
 - `GET /api/products/:id` — details. `404` if not found, `400` if `:id` isn't a valid UUID.
 - `PUT /api/products/:id` — partial update; only send the fields you want to change, including `isActive` to reactivate. Changing `code` is re-checked for uniqueness.
 - `DELETE /api/products/:id` — soft delete (`isActive` → `false`), consistent with Customers; reactivate via `PUT` with `{ "isActive": true }`.
 
-**Bonus scheme validation**: `schemeEnabled`, `schemePurchaseQty`, and `schemeBonusQty` are treated as one unit — you can never end up with a half-set scheme. If a request enables the scheme (either explicitly, or it's already enabled and untouched), the *effective* purchase/bonus quantities (this request's values, falling back to the product's current ones on a partial update) must both be present, with `schemePurchaseQty > 0` and `schemeBonusQty >= 0` — otherwise `400`. Disabling the scheme always nulls out both quantities. A partial update that touches none of these three fields leaves the existing scheme completely alone (it's not silently rewritten).
+- `POST /api/products/validate-bulk` — works out exactly what importing a `.xlsx`, `.xls` or `.csv` file **would do**,
+  without doing any of it. This is the first half of a two-step import: test the file, fix what's reported, then
+  import. `multipart/form-data` with the spreadsheet in a `file` field.
+
+  Returns `{ isValid, summary, errors, updates, unmappedHeaders, message }` where
+  `summary` is `{ totalRows, validRows, invalidRows, newProducts, updatedProducts, generatedCodes }`. Each error is
+  `{ row, field, message }` — the **spreadsheet row number**, the **column heading**, and what's wrong with that cell.
+  `updates` lists which existing products would change and how each was matched, so an update is never a surprise.
+
+- `POST /api/products/bulk-upload` — applies the file. Same body. It runs **exactly the same checks**
+  `validate-bulk` ran, through the same code path, because the client is never trusted to have called it.
+  All-or-nothing: if anything is wrong nothing is written and it answers `422` with the identical `errors` array;
+  otherwise every insert and update happens in a single transaction and it answers `201` with
+  `{ imported, updated, summary, products }`.
+
+- `GET /api/products/sample-template` — downloads `product-import-template.xlsx`: a **Products** sheet with required
+  columns first and marked `*`, two worked examples (the second deliberately leaves the code, MRP and scheme blank to
+  show the defaults working), plus an **Instructions** sheet explaining the matching rules and every default. The
+  template imports cleanly as-is.
+
+### The import is an upsert
+
+A row that matches a product already in the catalogue **updates** it; anything else is **inserted**. That makes
+re-importing a supplier's revised price list the normal case, rather than a source of duplicates.
+
+**Matching:**
+
+- A row that gives a **Product Code** matches the product with exactly that code (case-sensitive, as everywhere else
+  in the app). If nothing has that code the row is a **new** product using it — it does *not* then fall back to
+  matching by name, because an explicitly supplied new code says "this is a new product".
+- A row that leaves Product Code blank matches by **Product Name**, compared case-insensitively.
+- Anything unmatched is inserted, with a code generated at save time.
+
+**Guards**, all reported at validation rather than discovered on write:
+
+- Product names aren't unique in the table, so a name matching **several** products is refused rather than guessed at —
+  the error names every candidate's code and asks for a Product Code to disambiguate.
+- Two rows resolving to the **same existing product** are refused, as are two new rows claiming the same code, or the
+  same name with no codes.
+- An update **never changes a product's code** — that is the identity the `UNIQUE` constraint rests on — and never
+  touches `is_active`, so a deliberately deactivated product isn't silently brought back by a price list. Inactive
+  products are still matched, otherwise an import would try to insert a duplicate code and fail.
+
+### Import column rules
+
+Deliberately looser than the Add Product form, because a supplier's price list is not a carefully filled-in form:
+
+| Column | | New product | Existing product |
+| --- | --- | --- | --- |
+| Product Name | **required** | Non-blank, ≤200 characters | Updated |
+| Sale Price | **required** | A number greater than 0 | Updated |
+| Product Code | optional | Generated (`PROD-0001`…) if blank | Matches the product; never changed |
+| MRP | optional | Defaults to `0` | **Blank = left alone** |
+| Discount | optional | Defaults to `0` (0–100) | **Blank = left alone** |
+| Scheme Purchase Qty | optional | Blank = no scheme; above 0 creates one | **Blank = left alone**; `0` removes the scheme |
+| Scheme Bonus Qty | optional | Defaults to `0` | Only read when a Purchase Qty is given |
+| Company, Packing, Unit | optional | Empty if blank | **Blank = left alone** |
+
+**A blank cell means "leave this alone" on an update, not "set it to zero".** This is the single most important rule in
+the feature: a price list that only carries names, prices and manufacturers would otherwise wipe the MRP and bonus
+scheme off every product it touched. Defaults apply to new products only. The scheme's three fields are always changed
+together, so a Bonus Qty with no Purchase Qty is reported rather than half-applied.
+
+Headers are matched ignoring case, spaces, punctuation and the `*` marker, and common aliases are accepted
+(`price`/`rate` for Sale Price, `manufacturer` for Company, `purchase qty` for Scheme Purchase Qty, …). Numbers
+tolerate thousands separators and a leading currency symbol. Unrecognised columns are ignored but returned in
+`unmappedHeaders`, so a mistyped header is visible rather than silent. A sheet still carrying the old `Scheme Enabled`
+column is accepted, but a `Yes` with no purchase quantity is reported rather than silently dropped. Blank padding rows
+are skipped. New products are created Active.
+
+**Two validation gates.** The import's own rules produce the friendly per-field messages above; what each row would
+*become* is then checked against the **shared product validator** that `POST /api/products` uses — an insert as the
+whole payload, an update as the product it will be once the patch is applied. The import may be more permissive about
+what a *user* must supply, but it can never write a product the product API itself would reject.
+
+**Generated product codes.** Rows that leave Product Code blank and match nothing get one assigned inside the write
+transaction, not before it. Generation takes a transaction-level advisory lock (`pg_advisory_xact_lock`) and continues
+from the highest `PROD-#####` already in the table, so two imports uploaded at the same moment queue up instead of both
+reading the same highest code; codes typed explicitly into the same file are skipped. The `UNIQUE` constraint on `code`
+remains the real guarantee — any clash rolls the whole batch back.
+
+**Bonus scheme validation**:**Bonus scheme validation**:**Bonus scheme validation**: `schemeEnabled`, `schemePurchaseQty`, and `schemeBonusQty` are treated as one unit — you can never end up with a half-set scheme. If a request enables the scheme (either explicitly, or it's already enabled and untouched), the *effective* purchase/bonus quantities (this request's values, falling back to the product's current ones on a partial update) must both be present, with `schemePurchaseQty > 0` and `schemeBonusQty >= 0` — otherwise `400`. Disabling the scheme always nulls out both quantities. A partial update that touches none of these three fields leaves the existing scheme completely alone (it's not silently rewritten).
 
 ### Product UI
 
@@ -193,14 +286,480 @@ Under `frontend/src/pages/products/`, behind the same login/`ProtectedRoute` and
 - `ProductList.jsx` (`/products`) — table with name/code/company search, active/inactive filter, and Previous/Next pagination; columns include MRP, Sale Price, Discount, and the bonus scheme rendered as `"20 + 2"` (or "No scheme"). Same loading/error(+Retry)/empty states and inline Deactivate/Reactivate-with-confirmation as the Customer list, including the same out-of-range-page snap-back.
 - `AddProduct.jsx` / `EditProduct.jsx` — share `ProductForm.jsx`, with a Pricing section (MRP, Sale Price, Discount) and a Bonus Scheme section: an "Enable bonus scheme" checkbox that reveals Purchase/Bonus Quantity fields and a live preview line showing the scheme the way the spec documents it, e.g. "shown as `20 + 2`". Required fields use native HTML validation first; a JS validator (mirroring the backend's rules) catches anything that slips through, and server errors (e.g. duplicate code) surface inline without losing entered data.
 - `ProductDetails.jsx` (`/products/:id`) — read-only Basic Info / Pricing / Bonus Scheme sections, Edit and Deactivate/Reactivate actions, and a "not found" state for a missing/invalid id.
+- `ImportProductsModal.jsx` — bulk import, opened from **Import Products** beside Add Product on the list. It leads
+  with which columns are **Required** (Product Name, Sale Price) versus **Optional**, each optional one annotated with
+  what blank does for a new product versus an existing one, then a Download Sample Template button and a
+  drag-and-drop / click-to-choose upload area that checks extension and size before sending.
+
+  The two actions are ordered and gated: **1. Test / Validate File** is the only one available at first, and
+  **2. Upload / Import Products** stays disabled until a validation pass comes back completely clean. Choosing a
+  different file clears the previous result, so an enabled Import button can only ever refer to the file that was
+  actually checked.
+
+  A clean pass shows a green ✓ and a **breakdown** — rows processed, new products to add, existing products to update —
+  plus an expandable list of exactly which existing products would change and whether each was matched by code or by
+  name. That list is the safety net for the risk inherent in name matching: a typo silently rewriting the wrong
+  product. A failed pass shows the same breakdown alongside a table of **Row / Column / Problem**. The product list
+  behind the modal refreshes the moment anything lands.
+
 - `schemeFormat.js` — the single place that turns `{schemeEnabled, schemePurchaseQty, schemeBonusQty}` into the "20 + 2" / "No scheme" text, shared by the list and details views.
+
+## Users API
+
+- `GET /api/users` — read-only list of bookers (`id`, `name`, `username`, `phone`, `isActive`; never a password hash),
+  sorted by name. It exists so the Orders module's Booker filter (`PROJECT_SPEC.md` §17) can show names instead of ids.
+  Inactive bookers are included, because they still own historical orders that have to stay findable.
+
+This is deliberately the whole of it: there is no user management in the application and none is planned — no roles, no
+permissions, every authenticated booker has the same access (`PROJECT_SPEC.md` §2).
+
+## Orders API
+
+All endpoints are under `/api/orders` and require `Authorization: Bearer <token>`. Implemented in
+`backend/src/routes/orders.routes.js`, with the transaction in `backend/src/models/order.js`
+(`createOrderWithItems`) and the money/bonus rules in `backend/src/utils/orderPricing.js`.
+
+- `POST /api/orders` — create an order. Body:
+
+  ```json
+  {
+    "customerId": "<uuid>",
+    "status": "submitted",
+    "remarks": "Deliver before noon",
+    "items": [{ "productId": "<uuid>", "quantity": 25 }]
+  }
+  ```
+
+  `status` is optional and defaults to `"submitted"`; pass `"draft"` to save the order for later. A draft may have no
+  items (it's an order still being built) and never consumes an order number; a submitted order requires at least one
+  item and gets its `ORD-YYYYMMDD-XXX` number stamped in the same transaction (`PROJECT_SPEC.md` §11, §13, §26).
+  Returns `201` with the same body shape as `GET /api/orders/:id`.
+
+- `GET /api/orders` — list, newest first, paginated (`page`, `limit`, default 20 / max 100). Filters, all combinable:
+  `search` (order number, customer name, or customer code — case-insensitive, partial), `status`, `customerId`,
+  `bookerId`, `dateFrom`, `dateTo` (inclusive `YYYY-MM-DD` calendar dates matched on the order's creation date).
+  `status` takes one value or a comma-separated list (`submitted,cancelled`), so the Orders module can show submitted
+  and cancelled orders together while Draft Orders asks for drafts alone. Response:
+  `{ orders: [...], pagination: { page, limit, total, totalPages } }`. Each row carries the joined `customer` and
+  `booker`, an `itemCount`, and `cancelledByName` on a cancelled order, so the list needs no follow-up requests. Every
+  booker sees every order — there are no roles (`PROJECT_SPEC.md` §2); `bookerId` is a filter, not a permission.
+
+- `GET /api/orders/:id` — full details: the order, its `customer` and `booker`, and every line item with its
+  historical snapshot (`PROJECT_SPEC.md` §17). `404` if not found, `400` if `:id` isn't a valid UUID. Items come back
+  sorted by product name — all the lines of an order are inserted in one transaction and share a `created_at`, so that
+  column can't order them on its own, and a stable order keeps every view of an order consistent.
+
+- `PUT /api/orders/:id` — replace a **draft's** contents: customer, remarks and all lines. Same body as `POST`
+  minus `status` (an edit never changes an order's status — submitting is its own endpoint, so an edit can't quietly
+  finalize an order). Returns `409` for anything that isn't currently a draft, since submitted orders are not editable
+  (`PROJECT_SPEC.md` §14). The lines are **re-priced from the products' current values**, not carried over from the
+  saved snapshot — the same rule the order followed when it was first built (§6: the price at the moment the product is
+  added is what's copied in), so a draft picked up days later goes out at today's prices. The whole replacement is one
+  transaction; a rejected edit leaves the draft exactly as it was. The booker who created the order is never reassigned.
+
+- `POST /api/orders/:id/submit` — submit a draft (`PROJECT_SPEC.md` §13). This is where a draft stops being a work in
+  progress: it gets its final `ORD-YYYYMMDD-XXX` number, `submitted_at` is stamped, and it becomes immutable. The
+  number is reserved in the same transaction as the status change and the draft row is locked for the duration, so
+  concurrent submissions of one draft resolve to exactly one success and one order number — the rest get `409`. The
+  draft must hold at least one product (`400` otherwise, §26). Submitting sends the draft **exactly as saved**; it does
+  not re-price. `503` if the day's numbers are exhausted, as with `POST /api/orders`.
+
+- `DELETE /api/orders/:id` — delete a **draft** outright, along with its items. This is the one order the application
+  physically removes: it was never a real order, holds no order number, and nothing references it. Submitted and
+  cancelled orders are kept permanently (`PROJECT_SPEC.md` §12), so this returns `409` for those — unlike customers and
+  products, which are soft-deleted.
+
+- `POST /api/orders/:id/cancel` — cancel a **submitted** order (`PROJECT_SPEC.md` §15). The order is kept in full:
+  every line, its totals and its order number stay exactly as they were, and that number is never reissued. It is
+  marked cancelled and stamped with `cancelled_at` and `cancelled_by` — the authenticated booker, never one named by
+  the client (§33). From then on it is excluded from every sales figure (§12). `409` for a draft (delete it instead) or
+  for an order already cancelled; the row is locked for the transaction, so concurrent cancellations resolve to exactly
+  one recorded cancellation.
+
+**Submitted orders are locked, and the API is what enforces it** (`PROJECT_SPEC.md` §14, §16). Cancelling is the only
+operation a submitted order accepts. There is no endpoint that edits one — `PUT`, `DELETE` and `submit` all return
+`409` — so the immutability doesn't depend on the UI hiding a button. A mistake is corrected by cancelling the order
+and creating a new one.
+
+### What the server decides, and what the client may send
+
+A client sends **only** `customerId`, `status`, `remarks`, and `{ productId, quantity }` per line. Rate, MRP, discount,
+bonus quantity, line totals, order totals, the order number, and the booker are all derived server-side and any such
+values in the request body are ignored — a client can't set its own price, award itself a bonus, or book an order in
+someone else's name (`PROJECT_SPEC.md` §6, §9, §11, §33). The `quantity` you send is the **paid** quantity; bonus units
+are added on top of it, never taken out of it.
+
+### How a line is calculated
+
+For each line, taken from the product's values **at that moment** and then frozen (`PROJECT_SPEC.md` §6, §7, §16):
+
+- `rate` = the product's Sale Price (MRP is snapshotted alongside it for reference, but isn't what the line is priced on)
+- `lineSubtotal` = `rate × quantity`
+- `lineDiscount` = `lineSubtotal × discount%`, rounded to the nearest paisa — the discount is per product line, never
+  applied globally to the order (`PROJECT_SPEC.md` §7)
+- `lineTotal` = `lineSubtotal − lineDiscount`
+- `bonusQty` = `floor(quantity ÷ schemePurchaseQty) × schemeBonusQty` when the product's scheme is enabled, else `0`
+  (`PROJECT_SPEC.md` §9). A `20 + 2` scheme gives 2 at qty 20, 4 at qty 40, 2 at qty 25, and 0 at qty 19. Bonus units
+  have **zero sales value** — they never appear in any total.
+- The order's `subtotal`/`discountTotal`/`total` are the sums of its lines; there is no order-level discount.
+
+All money is computed in integer paisa and converted back to a decimal only at the end. That keeps floating-point drift
+out of stored money and guarantees the `total = subtotal - discount_total` (and per-line) check constraints hold exactly
+after rounding, instead of failing by a fraction of a paisa.
+
+### Transaction integrity
+
+The order row, all of its items, its totals, and (when submitted) its order number are written in **one** transaction
+(`PROJECT_SPEC.md` §30). The customer and products are read on that same transaction's connection, so the values
+snapshotted into the items are read and written together. If anything fails — an unknown product, a deactivated one, a
+constraint violation, the daily number cap — the whole thing rolls back: no order row, no orphan items, and the
+reserved order number is returned to the sequence rather than leaving a gap (verified directly).
+
+### Validation and error responses
+
+`400` with `{ error: { status, message, details } }` (`details` lists every problem found, `message` is the first):
+
+- `customerId` missing/malformed, or naming a customer that doesn't exist or is inactive
+- a `productId` that doesn't exist or names a deactivated product — deactivating a product stops it from being ordered,
+  while leaving every historical order that references it untouched
+- the same `productId` listed twice (list each product once with its total quantity; merging silently would make the
+  saved order differ from the one the user reviewed)
+- `quantity` missing, non-integer, `<= 0`, or above 1,000,000
+- `items` not an array, more than 200 items, or an empty `items` on a **submitted** order (empty drafts are fine)
+- `status` other than `draft`/`submitted` — an order can never be created already cancelled
+- `remarks` over 1000 characters
+- an order total beyond what the money columns can hold, caught before it reaches the database
+
+`503` is returned in one case: 999 orders already exist for the current day, so no valid `ORD-YYYYMMDD-XXX` number is
+left to issue. Nothing is saved, and the sequence resets at midnight. Drafts are unaffected — they never take a number.
+
+### Not in this stage
+
+Editing a draft, deleting a draft, submitting an existing draft, and cancelling a submitted order aren't exposed as
+routes yet — `submitOrder()`/`cancelOrder()` exist at the model layer (see [Order Numbering](#order-numbering)) and get
+their endpoints in Stages 6/7, along with the Orders UI. Submitted orders are already immutable in practice: there is
+no route that can change one.
+
+### Create Order UI
+
+`/orders/new` (sidebar: **Create Order**), built from `frontend/src/pages/orders/`. It follows the order flow in
+`PROJECT_SPEC.md` §10 top to bottom, and is deliberately the fastest screen in the app (§25).
+
+- `CreateOrder.jsx` — the screen: customer, product search, the order items table, and the Order Summary. Holds the
+  working order in component state; nothing is persisted until Save as Draft or Submit Order is pressed.
+- `CustomerPicker.jsx` — a searchable dropdown rather than a `<select>`, because a distributor's customer list is far
+  too long to scroll. Type to filter on name or code, arrow keys to move, Enter to pick; the chosen customer is then
+  shown as a card with contact details and a Change button. Only active customers are offered.
+- `ProductPicker.jsx` — the product table is on screen from the start (pre-loaded, not hidden behind a search), shows
+  the rate, discount and scheme that will apply before you add anything, and **Enter adds the top match** so a whole
+  order can be entered from the keyboard. Adding a product that's already on the order bumps its quantity instead of
+  creating a duplicate line — the API takes each product once with one total quantity. Only active products are offered.
+- `orderCalc.js` — the live preview maths, and a deliberate mirror of the backend's `orderPricing.js`.
+
+**Order items table** — one row per product with rate, an editable quantity, the scheme (`20 + 2`), the calculated
+bonus, line subtotal, line discount and line total. Everything recalculates as the quantity is typed. Paid and bonus
+quantities are kept visually distinct (§25): the bonus shows as a green `+2` badge, and a note under the table states
+that bonus units are free and added on top of the paid quantity, never taken out of it.
+
+**Order Summary** — Total Items, Total Paid Qty, Total Bonus Qty, Subtotal, Total Discount and Grand Total, in a panel
+that stays in view while products are added, with the Remarks box and both actions beneath it.
+
+**Save as Draft / Submit Order** — both `POST /api/orders`, with `status` set accordingly. A draft only needs a
+customer (it can be empty); submitting needs at least one line and a valid quantity on every line. Client-side checks
+mirror the API's rules so mistakes are caught without a round trip, and any server error is shown verbatim. On success
+the form resets and a banner reports the **server's** figures — the order number for a submitted order, or a note that
+a draft has no number until it's submitted.
+
+**Why the maths exists twice**: the booker has to watch the bonus and the line total change as they type, which has to
+happen locally. The server never trusts those numbers — it recalculates every one of them from each product's own
+current values at save time, and what it returns is what was stored. The two implementations were checked against each
+other over 20,983 combinations of price, discount, scheme and quantity (including 0.01 rates, 33.33 discounts,
+half-configured schemes, and 500 randomised multi-line orders) and agree exactly, so a rounding difference can't put a
+different number on screen than in the database.
+
+**States** — loading states on both searches, empty states that distinguish "nothing matches your search" from "nothing
+exists yet", retry buttons on failed searches, inline validation messages, invalid quantities highlighted in the row
+itself, and a confirmation dialog before Clear Order discards a part-built order (§25). The layout is responsive: the
+summary drops below the items on narrow screens instead of squeezing the table.
+
+### Draft Orders UI
+
+`/orders/drafts` (sidebar: **Draft Orders**), from `frontend/src/pages/orders/`. Covers every action
+`PROJECT_SPEC.md` §13 asks for.
+
+- `DraftOrders.jsx` (`/orders/drafts`) — the list: when it was saved, customer, booker, item count, total and remarks,
+  with a debounced customer search and Previous/Next pagination. Each row has **View**, **Continue**, **Submit** and
+  **Delete**. Submit and Delete both go through a confirmation dialog (§25) that states exactly what will happen — the
+  submit dialog quotes the customer, item count and grand total, and says the order becomes uneditable. Submit is
+  disabled on an empty draft with a tooltip explaining why, rather than letting the request fail. Same
+  loading/error(+Retry)/empty states and out-of-range-page snap-back as the other lists.
+- `DraftDetails.jsx` (`/orders/drafts/:id`) — read-only view of one order: status pill, customer and booker, timestamps,
+  remarks, every line with rate/paid qty/scheme/bonus/line total, and the same summary figures as Create Order, with
+  Continue Editing, Submit Order and Delete Draft. It renders whatever status the order actually is, so a stale link to
+  a draft that has since been submitted shows the submitted order correctly — without the draft-only actions.
+- `CreateOrder.jsx` (`/orders/drafts/:id/edit`) — the Create Order screen in edit mode. It loads the draft, fetches all
+  its products in one `ids` request, and rebuilds the lines from the products' **current** values. Two things get
+  called out rather than happening silently:
+  - **Re-priced lines**: if a product's price, discount or scheme has changed since the draft was saved, a banner names
+    those products and says the figures shown are what will be saved.
+  - **Withdrawn products**: a product deactivated since the draft was saved can't be ordered any more, so its line is
+    dropped and the banner says which — instead of failing on save with a server error.
+
+  Editing a submitted order isn't possible: the screen detects it and offers to view the order instead. **Save Draft**
+  keeps it a draft; **Submit Order** saves the on-screen contents first and then submits, so what was reviewed is
+  exactly what gets finalized, and lands on the order's own page where the new order number is shown.
+
+**Two ways to submit, and why they differ**: submitting from the list or the detail view sends the draft *exactly as
+saved* — the total in the confirmation dialog is the total that gets stored. Continuing a draft first re-prices it at
+today's values, which is what §6 prescribes for the moment a product is added to an order. Both paths show the booker
+the figures they're committing to before they commit, which is the property that matters.
+
+### Orders UI
+
+`/orders` (sidebar: **Orders**), from `frontend/src/pages/orders/`. This is the Orders module of
+`PROJECT_SPEC.md` §17 — submitted orders and their statuses. Drafts are not orders yet and stay on their own page.
+
+- `OrderList.jsx` (`/orders`) — order number, date, customer, booker, item count, total and a status badge, newest
+  first, paginated. A filter bar carries all four filters §17 asks for plus search, and they all combine:
+  - **Status** — All (submitted + cancelled), Submitted, or Cancelled
+  - **Customer** — the same searchable picker Create Order uses, so a long customer list stays workable
+  - **Booker** — populated from `GET /api/users`; inactive bookers are marked, since they still own past orders
+  - **Date range** — From/To date pickers that bound each other, plus a **Today's Orders** shortcut (§17)
+  - **Search** — order number, customer name or code
+
+  A failure to load the booker list costs only that one filter and never takes the page down. **Cancel** sits on each
+  submitted row behind a confirmation dialog that names the order, customer and grand total and says the order is kept
+  but excluded from all sales figures. There is deliberately no Edit action anywhere on this page.
+- `OrderDetails.jsx` (`/orders/:id`) — the single detail view for **every** order, whatever its status, showing the
+  customer, booker, timestamps, remarks, every line with its historical snapshot, and the full summary. It offers only
+  what the status permits, so a link never leads anywhere misleading:
+  - **draft** → Continue Editing, Submit Order, Delete Draft
+  - **submitted** → Cancel Order, plus a note that the order is locked and a mistake is corrected by cancelling and
+    re-creating
+  - **cancelled** → read-only, with a banner giving the cancellation time and who did it
+
+  `/orders/drafts/:id` still resolves here too, so links saved before this stage keep working. (It replaced the
+  near-identical `DraftDetails.jsx` from Stage 6 — two detail views that had to be kept in step was the wrong shape.)
+- `OrderStatusBadge.jsx` — the one place a status becomes a badge, so Draft (amber), Submitted (green) and Cancelled
+  (red) look identical everywhere they appear (§25). Cancelled rows are additionally greyed with the total struck
+  through, so a cancelled order can be read in full but never mistaken for one that counts.
+
+## Reports API
+
+`GET /api/reports?type=…&dateFrom=…&dateTo=…&page=…&limit=…` — requires `Authorization: Bearer <token>`.
+
+`type` selects the grouping (default `daily`): `daily`, `monthly`, `customer`, `product`, `booker`, `range`.
+`dateFrom`/`dateTo` are inclusive `YYYY-MM-DD` calendar dates (`400` if malformed, impossible, or reversed); omit both
+for all time. Rows are paginated (`limit` default 50 / max 200) — note the pagination `total` counts **groups**, not
+orders.
+
+Every response carries the same envelope:
+
+```json
+{
+  "type": "daily",
+  "dateFrom": "2026-03-01",
+  "dateTo": "2026-03-31",
+  "summary": { "orders": 2, "sales": 13000, "subtotal": 14000, "discountTotal": 1000, "paidQty": 25, "bonusQty": 2 },
+  "rows": [{ "period": "2026-03-10", "orders": 2, "sales": 13000 }],
+  "pagination": { "page": 1, "limit": 50, "total": 1, "totalPages": 1 }
+}
+```
+
+`summary` always covers the **whole period**, not the current page, so a paginated table still shows a true grand
+total. For `type=range` the summary *is* the report — "Date-range Sales" (§18) is the totals for a chosen period, not
+a different grouping — and `rows` is empty. Row shapes per type: `daily` → `period`/`orders`/`sales`; `monthly` →
+`period`/`year`/`month`/`orders`/`sales`; `customer` → customer id/name/code + `orders`/`sales`; `product` → product
+id/name/code + `paidQty`/`bonusQty`/`orders`/`sales`; `booker` → booker id/name/username + `orders`/`sales`.
+
+### The definition of a valid sale
+
+`backend/src/models/report.js` is the only place this is defined. `PROJECT_SPEC.md` §34 requires the Dashboard, Sales
+Reports and Targets to agree exactly — "do not implement separate formulas for each screen" — so every screen's
+figures come from here, and nothing outside that file writes its own SUM over orders.
+
+- **Only `submitted` orders count.** Drafts aren't sales yet, and a cancelled order stops being one the moment it's
+  cancelled (§12, §18). Status is exactly one of three values, so `status = 'submitted'` excludes both.
+- **Bonus quantities have zero sales value.** This needs no special case: a line's stored `line_total` is derived from
+  the *paid* quantity alone, so bonus units can never reach a total. Bonus is reported as a quantity, never as money.
+  (Tested directly: a scheme granting 100 free units adds `0` to sales.)
+- **Discounts reduce the line's value.** `line_total = line_subtotal - line_discount` and an order's total is the sum
+  of its lines, so summing either column already has discounts applied. The summary still breaks `subtotal` and
+  `discountTotal` out separately.
+- **Amounts are the snapshots taken at order time** (§16), so a later price or discount change can never move a
+  historical figure.
+
+**A sale's date is when the order was submitted**, not when its draft was created — an order drafted in January and
+submitted in February is a February sale. That is also the date its `ORD-YYYYMMDD-XXX` number was issued against, and
+(as of this stage) the date the Orders list filters on, so no two screens disagree about which day an order belongs to.
+Product-wise sales group by product **id** and label with the product's current name, so a renamed product stays one
+row while its money stays historical.
+
+### Sales Reports UI
+
+`/reports` (sidebar: **Sales Reports**), from `frontend/src/pages/reports/SalesReports.jsx`.
+
+Six tabs, one per report in §18. Each tab is just a column definition — the date range, totals strip, paging and the
+loading/empty/error states are shared, so the tabs cannot drift apart:
+
+| Tab | Columns |
+| --- | --- |
+| Daily | Date · Valid Orders · Sales |
+| Monthly | Month · Valid Orders · Sales |
+| Customer-wise | Customer (name + code) · Orders · Sales |
+| Product-wise | Product (name + code) · Paid Qty Sold · Bonus Qty · Sales |
+| Booker-wise | Booker · Orders · Sales |
+| Date Range | *(the totals strip is the report)* |
+
+A From/To date range applies to **every** tab, with Today / This Month / This Year / All Time presets. Above the table
+sits a totals strip — Valid Orders, Gross, Discount, **Total Sales**, Paid Qty Sold, Bonus Qty (free) — covering the
+whole selected period, not just the visible page, with a line underneath restating the rules in plain words. In the
+Product-wise tab the bonus column renders as a green `+N` badge rather than a number in a money column, so it reads as
+a free quantity next to the sales figure it contributed nothing to.
+
+**No sales arithmetic runs on the client.** Unlike the Create Order screen — which necessarily previews line totals
+locally — this page only formats what the API returns. There is no second implementation of the sales rules to keep in
+step.
+
+## Targets API
+
+Monthly targets (`PROJECT_SPEC.md` §19), at two scopes: the month **overall**, or one **manufacturer** within it.
+Company-wise targets are an approved extension to the original overall-only target and are recorded in §19 itself.
+There are still no booker targets and no area targets (§20).
+
+- `GET /api/targets?year=&month=&scope=` — a month's targets with what was actually achieved. `year`/`month` default
+  to the current month; `scope` is `all` (default — overall plus every company) or `overall`. Returns
+  `{ year, month, scope, overall, companies: [...] }`, where each row carries
+  `{ id, scope, company, targetAmount, achieved, remaining, achievementPercent, status, orders }`.
+- `POST /api/targets` — create a target that doesn't exist yet. Body `{ year, month, company?, targetAmount }`;
+  `409` if one already exists for that month and scope.
+- `PUT /api/targets` — **set** the target for a month and scope, creating it if absent. Addressed by scope rather than
+  id because that's what the caller knows ("the October target for GSK"), and it makes the form idempotent — saving
+  twice sets the same value instead of failing.
+- `PUT /api/targets/:id` — change an existing target's amount only. Moving a target to a different month or company
+  would silently change which sales it is measured against, so that isn't an edit.
+- `DELETE /api/targets/:id` — remove a target. Targets hold no history of their own (the orders they measure are
+  untouched), so unlike an order this is a real delete.
+- `GET /api/products/companies` — the distinct manufacturers products are assigned to; the options a company target
+  can be set against. Company is a field on the product (§5), not an entity — there is deliberately no companies table.
+
+**Scope rules.** `company` absent, `null`, or blank all mean the month's overall target, so an empty form field can't
+create a target for a company named `""`. A month has at most one overall target and at most one per company, enforced
+by a unique index on `(year, month, lower(coalesce(company, '')))` — `COALESCE` because SQL treats NULLs as distinct
+and would otherwise allow several "overall" targets, and `lower` because manufacturer names are typed by hand in two
+unrelated places, so `GSK` and `gsk` must be one target rather than two each claiming the same sales.
+
+**Company targets are independent of the overall target.** They don't have to add up to it and the overall target is
+never derived from them: products with no company recorded contribute to the overall figure only. A company target is
+attributed by each product's *current* manufacturer — products don't snapshot their company (it isn't a commercial
+value under §16), so correcting a product's manufacturer moves its past sales to the corrected company. The money on
+each line is untouched.
+
+### Target calculations
+
+All of it in `backend/src/models/target.js`'s `computeProgress`, so the Targets page and the Dashboard cannot compute
+it differently:
+
+- **Achieved** — valid sales for the month, from `report.js`. For a company target, only that manufacturer's product
+  lines. Aggregated over lines rather than orders so overall and company-wise use one code path — exact, not an
+  approximation, since an order's total is the sum of its line totals by database constraint. Drafts and cancelled
+  orders excluded, bonus quantities worth nothing, line discounts already deducted.
+- **Remaining** = `Target − Achieved`, returned raw, so an exceeded target reads as a negative number the UI shows as
+  "exceeded by".
+- **Achievement %** = `(Achieved / Target) × 100`, **or `null` when the target is zero or unset** — §19 requires
+  zero-target handling, and an undefined percentage is not an infinite one. Tests assert no `NaN` or `Infinity` ever
+  appears in a response.
+- **Status** — `achieved`, `in-progress`, `not-started`, or `no-target`. Decided server-side so every screen labels a
+  month the same way.
+
+### Targets UI
+
+`/targets` (sidebar: **Targets**), from `frontend/src/pages/targets/Targets.jsx`.
+
+Month and year pickers with a view switch (overall + company-wise, or overall only). A **Set a target** form takes a
+scope — "Overall (all companies)" or one manufacturer from `GET /api/products/companies` — and an amount; saving
+replaces the target for that month and scope. Below it, one progress card per scope (achievement % as the headline,
+a progress bar capped at 100% width so an overachieving month doesn't overflow while the figure beside it still reads
+true, then Target / Achieved / Remaining / Valid Orders), and a table with Target, Achieved, Remaining, Achievement %,
+Status and per-row Edit / Set Target / Remove. Rows for manufacturers that sold this month but have no target show
+`No Target Set` with a `Set Target` action — those rows are the reason to open the page. An exceeded target renders as
+a green `+amount` rather than a negative, because exceeding a target is good news. **No target or sales arithmetic runs
+on the client**; the page only formats what the API returns.
+
+## Dashboard API
+
+`GET /api/dashboard` — requires `Authorization: Bearer <token>`. The operational overview of `PROJECT_SPEC.md` §3, in
+one request:
+
+```json
+{
+  "date": "2026-09-06", "year": 2026, "month": 9,
+  "today":   { "orders": 8, "sales": 98100 },
+  "monthly": { "orders": 8, "sales": 98100 },
+  "target":  { "id": "…", "targetAmount": 122625, "achieved": 98100,
+               "remaining": 24525, "achievementPercent": 80, "status": "in-progress" },
+  "draftOrders": 1,
+  "recentOrders": [ /* the 8 most recent submitted/cancelled orders */ ]
+}
+```
+
+**This endpoint computes nothing of its own.** Every figure is assembled from the module that already owns it —
+today's and this month's sales from `models/report.js`, the target arithmetic from `models/target.js`, the draft count
+and recent orders from `models/order.js`. That is the design: §34 requires the Dashboard, Sales Reports and Targets to
+agree exactly and forbids a formula per screen, so the Dashboard has no sales arithmetic to get wrong. Drafts and
+cancelled orders are excluded, bonus quantities are worth nothing and line discounts are already deducted **because
+those modules do that**, not because this file repeats the rules.
+
+"Today" and "this month" come from the database's own clock — the same reference the sale dates and the daily
+`ORD-YYYYMMDD-XXX` sequence use — so the Dashboard can't disagree with a report about which day it is at a boundary.
+Recent orders exclude drafts (they aren't orders yet and have their own count and page) but include cancelled ones,
+shown struck through for context.
+
+### Dashboard UI
+
+`/` (sidebar: **Dashboard**), from `frontend/src/pages/Dashboard.jsx`. Quick Actions sit in the page header —
+**Create Order**, Customers, Products, Orders (§3, in that order). Below them a stat strip (Today's Orders, Today's
+Sales, this month's Orders and Sales, and a Draft Orders tile that links through to the drafts page), then the monthly
+target with a progress bar, then Recent Orders with status badges linking to each order. When no target is set for the
+month the card says so and links to `/targets` rather than showing a broken percentage. Loading, error-with-Retry and
+empty states throughout; nothing on the page does sales arithmetic.
 
 ## API Structure
 
-- All routes are mounted under `/api` via `backend/src/routes/index.js`. Add new domain routers there in later stages (orders, ...).
+- All routes are mounted under `/api` via `backend/src/routes/index.js`. Add new domain routers there in later stages (reports, targets, ...).
 - Route handlers that need to report an error should `throw new ApiError(statusCode, message)` (see `backend/src/utils/ApiError.js`), wrapping async handlers with `asyncHandler` (see `backend/src/utils/asyncHandler.js`) so the error reaches the centralized handler in `backend/src/middleware/errorHandler.js`.
 - Error responses have a consistent shape: `{ "error": { "status": <code>, "message": "..." } }`. Unknown routes return a 404 in the same shape via `backend/src/middleware/notFoundHandler.js`.
 - The frontend calls the API through `frontend/src/api/client.js`, a small `fetch` wrapper that reads `VITE_API_BASE_URL`, throws on non-2xx responses (using the error message above when present), and exposes `get`/`post`/`put`/`delete` helpers.
+
+## UI Conventions & QA
+
+A pass over every module (Stage 10) checked five things and fixed the gaps:
+
+- **Loading states** — every page that fetches shows one. Searches inside Create Order (customer and product pickers)
+  show their own, so the page never looks frozen while typing.
+- **Error states with Retry** — every load failure offers a way to recover without a browser reload. Five screens had
+  an error message with only a "Back" link and now have Retry: Customer Details, Edit Customer, Product Details, Edit
+  Product, and the Continue-Draft load in Create Order.
+- **Empty states** — distinguish "nothing matches your filter" from "nothing exists yet", and say what to do next.
+  Lists that can be emptied by an action (deactivating or deleting the last row on a page) snap back to a valid page
+  rather than stranding you on an empty one.
+- **Error boundary** — `components/ErrorBoundary.jsx` wraps the whole route tree. A render-time crash now shows a
+  recoverable screen with Try Again / Reload instead of blanking the app. Error boundaries must be class components;
+  there is no hook equivalent.
+- **Confirmation dialogs** — before every destructive or irreversible action: deactivating a customer or product,
+  deleting a draft, clearing a part-built order, submitting a draft or an order, cancelling an order, removing a
+  target. `ConfirmDialog` takes a `confirmVariant` so irreversible-but-not-destructive actions (submitting) are styled
+  as primary rather than danger, and each dialog states what will actually happen — the submit dialog quotes the
+  customer, item count and grand total.
+
+**Responsive**: below 900px the shell stacks and the sidebar becomes a horizontal scrolling strip, so the order tables
+get the full width. Below 640px form and detail grids collapse to one column, action buttons go full-width, and row
+actions wrap. Wide tables scroll inside their own container throughout rather than pushing the page sideways.
+
+**404**: an unknown URL gets a real "Page not found" screen. It previously reused a shared module placeholder, which
+told users the page "will be implemented in a later development stage" — misleading for a typo. That placeholder
+component has since been removed along with the `/prices` route, its last remaining caller, so every route in the
+navigation now leads to a real screen.
 
 ## Environment Variables
 
@@ -214,6 +773,12 @@ Copy each to `.env` in the same folder and adjust as needed. Never commit `.env`
 ## Known Issues
 
 - `npm audit` reports a few moderate/high advisories in transitive dependencies (`qs`/`body-parser` behind `express` in the backend; `esbuild`/`react-router` behind `vite`/`react-router-dom` in the frontend). No non-breaking fix is currently available (`npm audit fix` makes no changes); the only fixes require a major upgrade (Express 5, Vite 6+, React Router 7). Not addressed in this stage to avoid an unrequested breaking change — revisit in a maintenance pass.
+- `xlsx` (SheetJS), added for the bulk product import, is pinned at 0.18.5 — the newest version published to the npm
+  registry. SheetJS moved later releases to their own CDN, so `npm audit` reports advisories against it with no npm
+  upgrade available. The exposure here is limited: the parser only ever sees a file an authenticated booker uploaded
+  through the import modal, uploads are capped at 5 MB and 1000 rows, and the parsed values are validated before
+  anything reaches the database. Worth revisiting by installing from SheetJS's CDN if that risk profile changes.
+
 - No PostgreSQL server is bundled; you need one running locally (or reachable) for `npm run migrate:up`, `npm run db:test`, and `/api/health/db` to succeed. The rest of the app works without it.
 
 ## Development Approach

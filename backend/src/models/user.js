@@ -12,6 +12,14 @@ export async function findUserById(id) {
   return rows[0] || null;
 }
 
+// Every booker, for the Orders module's Booker filter (PROJECT_SPEC.md
+// §17). Inactive bookers are included: they still own historical orders,
+// which must stay findable.
+export async function listUsers() {
+  const { rows } = await pool.query(`SELECT ${SELECT_FIELDS} FROM users ORDER BY name ASC`);
+  return rows;
+}
+
 // Strips password_hash before a user record is ever sent in an API response.
 export function toPublicUser(user) {
   return {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { deactivateProduct, listProducts, updateProduct } from '../../api/products.js';
 import ConfirmDialog from '../../components/ConfirmDialog.jsx';
+import ImportProductsModal from './ImportProductsModal.jsx';
 import { formatScheme } from './schemeFormat.js';
 
 const PAGE_SIZE = 20;
@@ -16,6 +17,8 @@ export default function ProductList() {
   const [pagination, setPagination] = useState({ page: 1, limit: PAGE_SIZE, total: 0, totalPages: 1 });
   const [status, setStatus] = useState('loading');
   const [error, setError] = useState(null);
+
+  const [isImportOpen, setIsImportOpen] = useState(false);
 
   const [confirmTarget, setConfirmTarget] = useState(null);
   const [isMutating, setIsMutating] = useState(false);
@@ -88,9 +91,14 @@ export default function ProductList() {
     <div>
       <div className="page-header">
         <h2>Products</h2>
-        <Link to="/products/new" className="btn-primary">
-          Add Product
-        </Link>
+        <div className="header-actions">
+          <button type="button" className="btn-secondary" onClick={() => setIsImportOpen(true)}>
+            Import Products
+          </button>
+          <Link to="/products/new" className="btn-primary">
+            Add Product
+          </Link>
+        </div>
       </div>
 
       <div className="toolbar">
@@ -199,6 +207,17 @@ export default function ProductList() {
           </div>
         </>
       )}
+
+      <ImportProductsModal
+        open={isImportOpen}
+        onClose={() => setIsImportOpen(false)}
+        // Refreshed as soon as rows land, so the imported products are on
+        // screen the moment the modal closes.
+        onImported={() => {
+          setPage(1);
+          fetchProducts();
+        }}
+      />
 
       <ConfirmDialog
         open={Boolean(confirmTarget)}

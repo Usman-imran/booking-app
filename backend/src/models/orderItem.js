@@ -1,43 +1,77 @@
 import pool from '../config/db.js';
 
+const INSERT_COLUMNS = [
+  'order_id',
+  'product_id',
+  'product_name',
+  'product_code',
+  'mrp',
+  'rate',
+  'discount',
+  'paid_qty',
+  'bonus_qty',
+  'scheme_purchase_qty',
+  'scheme_bonus_qty',
+  'line_subtotal',
+  'line_discount',
+  'line_total',
+];
+
 const SELECT_FIELDS =
   'id, order_id, product_id, product_name, product_code, mrp, rate, discount, paid_qty, bonus_qty, scheme_purchase_qty, scheme_bonus_qty, line_subtotal, line_discount, line_total, created_at, updated_at';
 
-// Inserts one line item. Every commercial value is expected to already be a
-// snapshot taken at order time by the caller — this layer does not compute
-// pricing, discounts, or bonus quantities (that belongs to the Order API).
-export async function createOrderItem(data) {
-  const { rows } = await pool.query(
-    `INSERT INTO order_items (
-       order_id, product_id, product_name, product_code, mrp, rate, discount,
-       paid_qty, bonus_qty, scheme_purchase_qty, scheme_bonus_qty,
-       line_subtotal, line_discount, line_total
-     )
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+// Inserts every line of an order in one statement. Accepts an optional
+// transaction `client` so the items land in the same transaction as the
+// order row itself — an order must never exist with only some of its lines
+// saved (PROJECT_SPEC.md §30).
+//
+// This layer stores what it is given: the caller has already snapshotted
+// every commercial value (see utils/orderPricing.js). Nothing here computes
+// a price, a discount, or a bonus quantity.
+export async function createOrderItems(orderId, lines, client = pool) {
+  if (lines.length === 0) {
+    return [];
+  }
+
+  const params = [];
+  const valueGroups = lines.map((line) => {
+    const offset = params.length;
+    params.push(
+      orderId,
+      line.productId,
+      line.productName,
+      line.productCode,
+      line.mrp,
+      line.rate,
+      line.discount,
+      line.paidQty,
+      line.bonusQty,
+      line.schemePurchaseQty ?? null,
+      line.schemeBonusQty ?? null,
+      line.lineSubtotal,
+      line.lineDiscount,
+      line.lineTotal
+    );
+    return `(${INSERT_COLUMNS.map((_, index) => `$${offset + index + 1}`).join(', ')})`;
+  });
+
+  const { rows } = await client.query(
+    `INSERT INTO order_items (${INSERT_COLUMNS.join(', ')})
+     VALUES ${valueGroups.join(', ')}
      RETURNING ${SELECT_FIELDS}`,
-    [
-      data.orderId,
-      data.productId,
-      data.productName,
-      data.productCode,
-      data.mrp,
-      data.rate,
-      data.discount,
-      data.paidQty,
-      data.bonusQty,
-      data.schemePurchaseQty ?? null,
-      data.schemeBonusQty ?? null,
-      data.lineSubtotal,
-      data.lineDiscount,
-      data.lineTotal,
-    ]
+    params
   );
-  return rows[0];
+  return rows;
 }
 
-export async function findOrderItemsByOrderId(orderId) {
-  const { rows } = await pool.query(
-    `SELECT ${SELECT_FIELDS} FROM order_items WHERE order_id = $1 ORDER BY created_at ASC`,
+// Ordered by product name: all the lines of one order are inserted in a
+// single transaction and therefore share the same created_at, so that
+// column can't give a stable order on its own. Sorting by the snapshotted
+// name keeps every view of an order (details, re-order, reports) listing
+// its lines identically.
+export async function findOrderItemsByOrderId(orderId, client = pool) {
+  const { rows } = await client.query(
+    `SELECT ${SELECT_FIELDS} FROM order_items WHERE order_id = $1 ORDER BY product_name ASC, id ASC`,
     [orderId]
   );
   return rows;

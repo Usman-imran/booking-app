@@ -3,6 +3,11 @@ import healthRouter from './health.routes.js';
 import authRouter from './auth.routes.js';
 import customersRouter from './customers.routes.js';
 import productsRouter from './products.routes.js';
+import ordersRouter from './orders.routes.js';
+import usersRouter from './users.routes.js';
+import reportsRouter from './reports.routes.js';
+import targetsRouter from './targets.routes.js';
+import dashboardRouter from './dashboard.routes.js';
 
 const router = Router();
 
@@ -10,8 +15,10 @@ router.use('/health', healthRouter);
 router.use('/auth', authRouter);
 router.use('/customers', customersRouter);
 router.use('/products', productsRouter);
-
-// Further business domain routers (orders, ...) will be mounted here in
-// later stages.
+router.use('/orders', ordersRouter);
+router.use('/users', usersRouter);
+router.use('/reports', reportsRouter);
+router.use('/targets', targetsRouter);
+router.use('/dashboard', dashboardRouter);
 
 export default router;

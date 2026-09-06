@@ -15,8 +15,11 @@ const UPDATABLE_COLUMNS = {
   isActive: 'is_active',
 };
 
-export async function findCustomerById(id) {
-  const { rows } = await pool.query(`SELECT ${SELECT_FIELDS} FROM customers WHERE id = $1`, [id]);
+// Accepts an optional transaction `client` so callers that must read the
+// customer inside their own transaction (order creation) can do so on the
+// same connection instead of a separate pooled one.
+export async function findCustomerById(id, client = pool) {
+  const { rows } = await client.query(`SELECT ${SELECT_FIELDS} FROM customers WHERE id = $1`, [id]);
   return rows[0] || null;
 }
 

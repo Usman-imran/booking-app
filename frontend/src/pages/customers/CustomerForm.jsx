@@ -69,7 +69,7 @@ export default function CustomerForm({ initialValues, submitLabel, onSubmit, onC
           <input type="text" value={values.alternatePhone} onChange={handleChange('alternatePhone')} />
         </label>
         <label>
-          City/Area
+          Area
           <input type="text" value={values.cityArea} onChange={handleChange('cityArea')} />
         </label>
         <label>

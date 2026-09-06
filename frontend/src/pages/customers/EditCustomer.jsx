@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import CustomerForm from './CustomerForm.jsx';
 import { getCustomer, updateCustomer } from '../../api/customers.js';
@@ -10,28 +10,25 @@ export default function EditCustomer() {
   const [status, setStatus] = useState('loading');
   const [error, setError] = useState(null);
 
-  useEffect(() => {
-    let cancelled = false;
+  // Lifted out of the effect so the error state can offer a Retry rather
+  // than leaving a browser reload as the only way forward.
+  const fetchCustomer = useCallback(() => {
     setStatus('loading');
-
-    getCustomer(id)
+    setError(null);
+    return getCustomer(id)
       .then((data) => {
-        if (!cancelled) {
-          setCustomer(data.customer);
-          setStatus('ready');
-        }
+        setCustomer(data.customer);
+        setStatus('ready');
       })
       .catch((err) => {
-        if (!cancelled) {
-          setError(err.message);
-          setStatus('error');
-        }
+        setError(err.message);
+        setStatus('error');
       });
-
-    return () => {
-      cancelled = true;
-    };
   }, [id]);
+
+  useEffect(() => {
+    fetchCustomer();
+  }, [fetchCustomer]);
 
   async function handleSubmit(values) {
     await updateCustomer(id, values);
@@ -46,7 +43,14 @@ export default function EditCustomer() {
     return (
       <div className="page-placeholder">
         <p>Could not load customer: {error}</p>
-        <Link to="/customers">Back to Customers</Link>
+        <div className="form-actions">
+          <Link to="/customers" className="btn-secondary">
+            Back to Customers
+          </Link>
+          <button type="button" className="btn-primary" onClick={fetchCustomer}>
+            Retry
+          </button>
+        </div>
       </div>
     );
   }
