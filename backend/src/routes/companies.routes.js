@@ -23,7 +23,7 @@ router.use(authenticate);
 router.get(
   '/',
   asyncHandler(async (req, res) => {
-    const companies = await listCompaniesWithCounts();
+    const companies = await listCompaniesWithCounts(req.user.id);
     res.json({
       companies,
       total: companies.length,

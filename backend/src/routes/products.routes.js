@@ -270,13 +270,13 @@ router.post(
       throw new ApiError(400, errors[0], errors);
     }
 
-    if (await findProductByCode(data.code)) {
+    if (await findProductByCode(req.user.id, data.code)) {
       throw new ApiError(409, 'Product code already exists.');
     }
 
     let product;
     try {
-      product = await createProduct(data);
+      product = await createProduct(req.user.id, data);
     } catch (err) {
       if (err.code === '23505') {
         throw new ApiError(409, 'Product code already exists.');
@@ -339,7 +339,7 @@ router.get(
     // rather than being clipped by the normal page size.
     const effectiveLimit = ids ? ids.length : limit;
 
-    const { rows, total } = await listProducts({
+    const { rows, total } = await listProducts(req.user.id, {
       search: search || undefined,
       isActive,
       ids,
@@ -379,6 +379,9 @@ router.get(
 // without doing any of it. Both endpoints go through this, so a file that
 // validates clean cannot then behave differently on upload.
 async function inspectUpload(req, res) {
+  // Existing products are matched within the uploader's own catalogue only.
+  const ownerId = req.user.id;
+
   await receiveUpload(req, res);
 
   if (!req.file) {
@@ -408,8 +411,8 @@ async function inspectUpload(req, res) {
   const providedNames = parsed.rows.map((row) => String(row.cells.name ?? '').trim()).filter(Boolean);
 
   const [byCode, byName] = await Promise.all([
-    findProductsByCodes(providedCodes),
-    findProductsByNames(providedNames),
+    findProductsByCodes(ownerId, providedCodes),
+    findProductsByNames(ownerId, providedNames),
   ]);
 
   const productsByCode = new Map(byCode.map((product) => [product.code, product]));
@@ -569,7 +572,7 @@ router.post(
 
     let result;
     try {
-      result = await bulkUpsertProducts({
+      result = await bulkUpsertProducts(req.user.id, {
         inserts: inspection.inserts.map((row) => ({ ...row.payload })),
         updates: inspection.updates.map((row) => ({ productId: row.productId, patch: row.patch })),
       });
@@ -609,7 +612,7 @@ router.post(
 router.get(
   '/companies',
   asyncHandler(async (req, res) => {
-    const companies = await listProductCompanies();
+    const companies = await listProductCompanies(req.user.id);
     res.json({ companies });
   })
 );
@@ -619,7 +622,7 @@ router.get(
   asyncHandler(async (req, res) => {
     requireValidId(req.params.id);
 
-    const product = await findProductById(req.params.id);
+    const product = await findProductById(req.user.id, req.params.id);
     if (!product) {
       throw new ApiError(404, 'Product not found.');
     }
@@ -633,7 +636,7 @@ router.put(
   asyncHandler(async (req, res) => {
     requireValidId(req.params.id);
 
-    const existing = await findProductById(req.params.id);
+    const existing = await findProductById(req.user.id, req.params.id);
     if (!existing) {
       throw new ApiError(404, 'Product not found.');
     }
@@ -648,7 +651,7 @@ router.put(
     }
 
     if (data.code && data.code !== existing.code) {
-      const codeOwner = await findProductByCode(data.code);
+      const codeOwner = await findProductByCode(req.user.id, data.code);
       if (codeOwner && codeOwner.id !== existing.id) {
         throw new ApiError(409, 'Product code already exists.');
       }
@@ -656,7 +659,7 @@ router.put(
 
     let updated;
     try {
-      updated = await updateProduct(req.params.id, data);
+      updated = await updateProduct(req.user.id, req.params.id, data);
     } catch (err) {
       if (err.code === '23505') {
         throw new ApiError(409, 'Product code already exists.');
@@ -673,7 +676,7 @@ router.delete(
   asyncHandler(async (req, res) => {
     requireValidId(req.params.id);
 
-    const updated = await deactivateProduct(req.params.id);
+    const updated = await deactivateProduct(req.user.id, req.params.id);
     if (!updated) {
       throw new ApiError(404, 'Product not found.');
     }

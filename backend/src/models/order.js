@@ -6,6 +6,12 @@ import { findCustomerById } from './customer.js';
 import { findProductsByIds, toPublicProduct } from './product.js';
 import { createOrderItems, findOrderItemsByOrderId } from './orderItem.js';
 
+// An order belongs to the user who booked it (booker_id) and is invisible to
+// everyone else. Every function here takes that owner explicitly and folds
+// it into the WHERE clause, so an order id belonging to another account
+// behaves exactly like one that doesn't exist. The customer and products an
+// order references are looked up within the same owner's data, so an order
+// can never be built from — or point at — someone else's records.
 const SELECT_FIELDS =
   'id, order_number, customer_id, booker_id, status, remarks, subtotal, discount_total, total, submitted_at, cancelled_at, cancelled_by, created_at, updated_at';
 
@@ -36,6 +42,12 @@ const ORDER_JOINED_FIELDS = `${ORDER_FIELDS_QUALIFIED},
 // go through createOrderWithItems() below; this remains the minimal
 // schema-level helper.
 export async function createOrder({ customerId, bookerId, remarks }) {
+  // The customer must be the booker's own; a foreign id is a 400, the
+  // same as a missing one.
+  if (!(await findCustomerById(bookerId, customerId))) {
+    throw new ApiError(400, 'Customer not found.');
+  }
+
   const { rows } = await pool.query(
     `INSERT INTO orders (customer_id, booker_id, remarks)
      VALUES ($1, $2, $3)
@@ -68,8 +80,8 @@ export async function createOrder({ customerId, bookerId, remarks }) {
 // order differently. Runs on the caller's transaction client, so the values
 // it reads are read on the same connection, inside the same transaction,
 // that will write them.
-async function buildOrderContents(client, { customerId, items }) {
-  const customer = await findCustomerById(customerId, client);
+async function buildOrderContents(client, { ownerId, customerId, items }) {
+  const customer = await findCustomerById(ownerId, customerId, client);
   if (!customer) {
     throw new ApiError(400, 'Customer not found.');
   }
@@ -79,6 +91,7 @@ async function buildOrderContents(client, { customerId, items }) {
 
   // One lookup for every referenced product, then a snapshot per line.
   const productRows = await findProductsByIds(
+    ownerId,
     items.map((item) => item.productId),
     client
   );
@@ -110,13 +123,13 @@ export async function createOrderWithItems({ customerId, bookerId, status, remar
   try {
     await client.query('BEGIN');
 
-    const { lines, totals } = await buildOrderContents(client, { customerId, items });
+    const { lines, totals } = await buildOrderContents(client, { ownerId: bookerId, customerId, items });
 
     // Reserved as late as possible: this takes a lock on the day's counter
     // row that is held until COMMIT, and every other caller submitting
     // today waits behind it (see utils/orderNumber.js). Drafts skip it
     // entirely and never contend.
-    const orderNumber = status === 'submitted' ? await reserveNextOrderNumber(client) : null;
+    const orderNumber = status === 'submitted' ? await reserveNextOrderNumber(client, bookerId) : null;
 
     const { rows: orderRows } = await client.query(
       `INSERT INTO orders (order_number, customer_id, booker_id, status, remarks, subtotal, discount_total, total, submitted_at)
@@ -151,25 +164,32 @@ export async function createOrderWithItems({ customerId, bookerId, status, remar
   }
 }
 
-export async function findOrderById(id) {
-  const { rows } = await pool.query(`SELECT ${SELECT_FIELDS} FROM orders WHERE id = $1`, [id]);
+export async function findOrderById(ownerId, id) {
+  const { rows } = await pool.query(`SELECT ${SELECT_FIELDS} FROM orders WHERE booker_id = $1 AND id = $2`, [
+    ownerId,
+    id,
+  ]);
   return rows[0] || null;
 }
 
 // How many orders are sitting in a given status. The Dashboard needs the
 // draft/pending count (PROJECT_SPEC.md §3) and only the number, so this
 // avoids fetching a page of rows just to read a total off it.
-export async function countOrdersByStatus(statuses) {
-  const { rows } = await pool.query(`SELECT COUNT(*)::int AS total FROM orders WHERE status = ANY($1::text[])`, [
-    statuses,
-  ]);
+export async function countOrdersByStatus(ownerId, statuses) {
+  const { rows } = await pool.query(
+    `SELECT COUNT(*)::int AS total FROM orders WHERE booker_id = $1 AND status = ANY($2::text[])`,
+    [ownerId, statuses]
+  );
   return rows[0].total;
 }
 
 // Full order details: the order with its customer/booker information and
 // every line item (PROJECT_SPEC.md §17).
-export async function findOrderDetailsById(id) {
-  const { rows } = await pool.query(`SELECT ${ORDER_JOINED_FIELDS} ${ORDER_JOINS} WHERE o.id = $1`, [id]);
+export async function findOrderDetailsById(ownerId, id) {
+  const { rows } = await pool.query(
+    `SELECT ${ORDER_JOINED_FIELDS} ${ORDER_JOINS} WHERE o.booker_id = $1 AND o.id = $2`,
+    [ownerId, id]
+  );
   const order = rows[0];
   if (!order) {
     return null;
@@ -194,9 +214,9 @@ export async function findOrderDetailsById(id) {
 // Sales Reports use (models/report.js) for anything already submitted.
 const ORDER_DATE = 'COALESCE(o.submitted_at, o.created_at)';
 
-export async function listOrders({ search, statuses, customerId, bookerId, dateFrom, dateTo, page, limit }) {
-  const conditions = [];
-  const params = [];
+export async function listOrders(ownerId, { search, statuses, customerId, dateFrom, dateTo, page, limit }) {
+  const params = [ownerId];
+  const conditions = ['o.booker_id = $1'];
 
   if (search) {
     params.push(`%${search}%`);
@@ -218,11 +238,6 @@ export async function listOrders({ search, statuses, customerId, bookerId, dateF
     conditions.push(`o.customer_id = $${params.length}`);
   }
 
-  if (bookerId) {
-    params.push(bookerId);
-    conditions.push(`o.booker_id = $${params.length}`);
-  }
-
   if (dateFrom) {
     params.push(dateFrom);
     conditions.push(`${ORDER_DATE}::date >= $${params.length}::date`);
@@ -233,7 +248,7 @@ export async function listOrders({ search, statuses, customerId, bookerId, dateF
     conditions.push(`${ORDER_DATE}::date <= $${params.length}::date`);
   }
 
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const whereClause = `WHERE ${conditions.join(' AND ')}`;
 
   const countResult = await pool.query(`SELECT COUNT(*)::int AS total ${ORDER_JOINS} ${whereClause}`, params);
   const total = countResult.rows[0].total;
@@ -268,14 +283,15 @@ export async function listOrders({ search, statuses, customerId, bookerId, dateF
 // ones. Nothing is locked until the draft is submitted.
 //
 // The booker who created the order is never reassigned by an edit.
-export async function updateDraftOrder({ orderId, customerId, remarks, items }) {
+export async function updateDraftOrder({ ownerId, orderId, customerId, remarks, items }) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    const { rows: existingRows } = await client.query('SELECT id, status FROM orders WHERE id = $1 FOR UPDATE', [
-      orderId,
-    ]);
+    const { rows: existingRows } = await client.query(
+      'SELECT id, status FROM orders WHERE booker_id = $1 AND id = $2 FOR UPDATE',
+      [ownerId, orderId]
+    );
     const existing = existingRows[0];
 
     if (!existing) {
@@ -285,7 +301,7 @@ export async function updateDraftOrder({ orderId, customerId, remarks, items }) 
       throw new ApiError(409, `Only draft orders can be edited (this order is ${existing.status}).`);
     }
 
-    const { lines, totals } = await buildOrderContents(client, { customerId, items });
+    const { lines, totals } = await buildOrderContents(client, { ownerId, customerId, items });
 
     // Replace rather than reconcile: the request carries the draft's full
     // contents, so working out per-line inserts/updates/deletes would add
@@ -318,14 +334,14 @@ export async function updateDraftOrder({ orderId, customerId, remarks, items }) 
 //
 // A deleted draft never had an order number, so nothing is orphaned and no
 // number is lost.
-export async function deleteDraftOrder(orderId) {
+export async function deleteDraftOrder(ownerId, orderId) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
     const { rows: existingRows } = await client.query(
-      `SELECT ${SELECT_FIELDS} FROM orders WHERE id = $1 FOR UPDATE`,
-      [orderId]
+      `SELECT ${SELECT_FIELDS} FROM orders WHERE booker_id = $1 AND id = $2 FOR UPDATE`,
+      [ownerId, orderId]
     );
     const existing = existingRows[0];
 
@@ -358,14 +374,15 @@ export async function deleteDraftOrder(orderId) {
 // The draft's stored line snapshots are what get locked in; submitting
 // doesn't re-price them. Re-pricing happens when a draft is edited (see
 // updateDraftOrder), which is what "Continue Draft" does.
-export async function submitOrder(orderId) {
+export async function submitOrder(ownerId, orderId) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    const { rows: existingRows } = await client.query('SELECT id, status FROM orders WHERE id = $1 FOR UPDATE', [
-      orderId,
-    ]);
+    const { rows: existingRows } = await client.query(
+      'SELECT id, status FROM orders WHERE booker_id = $1 AND id = $2 FOR UPDATE',
+      [ownerId, orderId]
+    );
     const existing = existingRows[0];
 
     if (!existing) {
@@ -386,7 +403,7 @@ export async function submitOrder(orderId) {
       throw new ApiError(400, 'Add at least one product before submitting this draft.');
     }
 
-    const orderNumber = await reserveNextOrderNumber(client);
+    const orderNumber = await reserveNextOrderNumber(client, ownerId);
 
     const { rows } = await client.query(
       `UPDATE orders
@@ -419,14 +436,17 @@ export async function submitOrder(orderId) {
 // `cancelled_at` and `cancelled_by` are stamped together with the status;
 // the database's check constraint would reject the row if any of the three
 // were missing (PROJECT_SPEC.md §33).
-export async function cancelOrder(orderId, cancelledByUserId) {
+// Only the order's own booker can cancel it — the same user who is the
+// order's owner, so `cancelled_by` is always that user.
+export async function cancelOrder(ownerId, orderId) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    const { rows: existingRows } = await client.query('SELECT id, status FROM orders WHERE id = $1 FOR UPDATE', [
-      orderId,
-    ]);
+    const { rows: existingRows } = await client.query(
+      'SELECT id, status FROM orders WHERE booker_id = $1 AND id = $2 FOR UPDATE',
+      [ownerId, orderId]
+    );
     const existing = existingRows[0];
 
     if (!existing) {
@@ -444,7 +464,7 @@ export async function cancelOrder(orderId, cancelledByUserId) {
        SET status = 'cancelled', cancelled_at = now(), cancelled_by = $1
        WHERE id = $2
        RETURNING ${SELECT_FIELDS}`,
-      [cancelledByUserId, orderId]
+      [ownerId, orderId]
     );
 
     await client.query('COMMIT');

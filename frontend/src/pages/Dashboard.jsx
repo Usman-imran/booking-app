@@ -199,7 +199,6 @@ export default function Dashboard() {
                         <th>Order #</th>
                         <th>Date</th>
                         <th>Customer</th>
-                        <th>Booker</th>
                         <th className="numeric">Total</th>
                         <th>Status</th>
                       </tr>
@@ -217,7 +216,6 @@ export default function Dashboard() {
                               {order.customer.name}
                               <div className="muted">{order.customer.code}</div>
                             </td>
-                            <td>{order.booker.name}</td>
                             <td className={isCancelled ? 'numeric value-void' : 'numeric'}>
                               {formatMoney(order.total)}
                             </td>

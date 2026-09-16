@@ -1,5 +1,10 @@
 import pool from '../config/db.js';
 
+// Every customer belongs to exactly one user (owner_id) and is invisible to
+// everyone else. Each function here takes the owner explicitly and folds it
+// into the WHERE clause, so a customer id belonging to another account
+// behaves exactly like one that doesn't exist. Nothing in this file can be
+// called without saying whose data it is.
 const SELECT_FIELDS =
   'id, name, code, contact_person, phone, alternate_phone, address, city_area, customer_type, is_active, created_at, updated_at';
 
@@ -18,22 +23,30 @@ const UPDATABLE_COLUMNS = {
 // Accepts an optional transaction `client` so callers that must read the
 // customer inside their own transaction (order creation) can do so on the
 // same connection instead of a separate pooled one.
-export async function findCustomerById(id, client = pool) {
-  const { rows } = await client.query(`SELECT ${SELECT_FIELDS} FROM customers WHERE id = $1`, [id]);
+export async function findCustomerById(ownerId, id, client = pool) {
+  const { rows } = await client.query(`SELECT ${SELECT_FIELDS} FROM customers WHERE owner_id = $1 AND id = $2`, [
+    ownerId,
+    id,
+  ]);
   return rows[0] || null;
 }
 
-export async function findCustomerByCode(code) {
-  const { rows } = await pool.query(`SELECT ${SELECT_FIELDS} FROM customers WHERE code = $1`, [code]);
+// Codes are unique per owner, not globally, so the lookup is scoped too.
+export async function findCustomerByCode(ownerId, code) {
+  const { rows } = await pool.query(`SELECT ${SELECT_FIELDS} FROM customers WHERE owner_id = $1 AND code = $2`, [
+    ownerId,
+    code,
+  ]);
   return rows[0] || null;
 }
 
-export async function createCustomer(data) {
+export async function createCustomer(ownerId, data) {
   const { rows } = await pool.query(
-    `INSERT INTO customers (name, code, contact_person, phone, alternate_phone, address, city_area, customer_type)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    `INSERT INTO customers (owner_id, name, code, contact_person, phone, alternate_phone, address, city_area, customer_type)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      RETURNING ${SELECT_FIELDS}`,
     [
+      ownerId,
       data.name,
       data.code,
       data.contactPerson ?? null,
@@ -48,7 +61,7 @@ export async function createCustomer(data) {
 }
 
 // Applies only the fields present in `data` (partial update).
-export async function updateCustomer(id, data) {
+export async function updateCustomer(ownerId, id, data) {
   const setClauses = [];
   const params = [];
 
@@ -60,28 +73,30 @@ export async function updateCustomer(id, data) {
   }
 
   if (setClauses.length === 0) {
-    return findCustomerById(id);
+    return findCustomerById(ownerId, id);
   }
 
-  params.push(id);
+  params.push(ownerId, id);
   const { rows } = await pool.query(
-    `UPDATE customers SET ${setClauses.join(', ')} WHERE id = $${params.length} RETURNING ${SELECT_FIELDS}`,
+    `UPDATE customers SET ${setClauses.join(', ')}
+     WHERE owner_id = $${params.length - 1} AND id = $${params.length}
+     RETURNING ${SELECT_FIELDS}`,
     params
   );
   return rows[0] || null;
 }
 
-export async function deactivateCustomer(id) {
+export async function deactivateCustomer(ownerId, id) {
   const { rows } = await pool.query(
-    `UPDATE customers SET is_active = false WHERE id = $1 RETURNING ${SELECT_FIELDS}`,
-    [id]
+    `UPDATE customers SET is_active = false WHERE owner_id = $1 AND id = $2 RETURNING ${SELECT_FIELDS}`,
+    [ownerId, id]
   );
   return rows[0] || null;
 }
 
-export async function listCustomers({ search, isActive, page, limit }) {
-  const conditions = [];
-  const params = [];
+export async function listCustomers(ownerId, { search, isActive, page, limit }) {
+  const params = [ownerId];
+  const conditions = ['owner_id = $1'];
 
   if (search) {
     params.push(`%${search}%`);
@@ -93,7 +108,7 @@ export async function listCustomers({ search, isActive, page, limit }) {
     conditions.push(`is_active = $${params.length}`);
   }
 
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const whereClause = `WHERE ${conditions.join(' AND ')}`;
 
   const countResult = await pool.query(`SELECT COUNT(*)::int AS total FROM customers ${whereClause}`, params);
   const total = countResult.rows[0].total;

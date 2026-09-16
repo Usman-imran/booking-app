@@ -25,33 +25,19 @@ export async function createUser({ name, username, passwordHash, phone, companyN
   return rows[0];
 }
 
-export async function countUsers() {
-  const { rows } = await pool.query('SELECT COUNT(*)::int AS total FROM users');
-  return rows[0].total;
-}
-
-// Sets the company name across EVERY account on this installation.
-//
-// Deliberately not per-user. This application is a standalone system for one
-// distribution business (PROJECT_SPEC.md §1), and the company name is what
-// brands it — the sidebar and every printed order receipt. Two bookers at
-// the same firm printing receipts headed with different names would be a
-// bug, not a feature, so renaming the business renames it for everyone.
+// Renames the business ONE account works for. Every account is its own
+// isolated workspace, so the company name — which brands that user's
+// sidebar and receipts — is theirs alone to set.
 //
 // It lives on `users` because that is where registration captures it; there
 // is no settings table and §27 warns against inventing one for a single
 // value.
-export async function setCompanyNameForAllUsers(companyName) {
-  const { rowCount } = await pool.query('UPDATE users SET company_name = $1', [companyName]);
-  return rowCount;
-}
-
-// Every booker, for the Orders module's Booker filter (PROJECT_SPEC.md
-// §17). Inactive bookers are included: they still own historical orders,
-// which must stay findable.
-export async function listUsers() {
-  const { rows } = await pool.query(`SELECT ${SELECT_FIELDS} FROM users ORDER BY name ASC`);
-  return rows;
+export async function setCompanyName(userId, companyName) {
+  const { rows } = await pool.query(
+    `UPDATE users SET company_name = $1 WHERE id = $2 RETURNING ${SELECT_FIELDS}`,
+    [companyName, userId]
+  );
+  return rows[0] || null;
 }
 
 // Strips password_hash before a user record is ever sent in an API response.

@@ -31,8 +31,7 @@ export default function App() {
       <ErrorBoundary>
         <Routes>
           <Route path="/login" element={<Login />} />
-          {/* Public: the first account is created before anyone can sign
-              in. A signed-in booker adding a colleague lands here too. */}
+          {/* Public: anyone can create an account. */}
           <Route path="/signup" element={<Signup />} />
 
           <Route element={<ProtectedRoute />}>

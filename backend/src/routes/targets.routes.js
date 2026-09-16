@@ -120,7 +120,12 @@ router.get(
       throw new ApiError(400, 'scope must be one of: all, overall.');
     }
 
-    const progress = await getMonthProgress({ year, month, includeCompanies: scope === 'all' });
+    const progress = await getMonthProgress({
+      ownerId: req.user.id,
+      year,
+      month,
+      includeCompanies: scope === 'all',
+    });
     res.json({ ...progress, scope });
   })
 );
@@ -135,7 +140,7 @@ router.post(
       throw new ApiError(400, errors[0], errors);
     }
 
-    const existing = await findTargetByScope(data);
+    const existing = await findTargetByScope({ ownerId: req.user.id, ...data });
     if (existing) {
       throw new ApiError(
         409,
@@ -147,7 +152,7 @@ router.post(
 
     let target;
     try {
-      target = await createTarget(data);
+      target = await createTarget({ ownerId: req.user.id, ...data });
     } catch (err) {
       // Lost a race with a concurrent create against the unique index.
       if (err.code === '23505') {
@@ -175,7 +180,7 @@ router.put(
       throw new ApiError(400, errors[0], errors);
     }
 
-    const target = await upsertTarget(data);
+    const target = await upsertTarget({ ownerId: req.user.id, ...data });
     res.json({ target: toPublicTarget(target) });
   })
 );
@@ -196,12 +201,12 @@ router.put(
       throw new ApiError(400, errors[0], errors);
     }
 
-    const existing = await findTargetById(req.params.id);
+    const existing = await findTargetById(req.user.id, req.params.id);
     if (!existing) {
       throw new ApiError(404, 'Target not found.');
     }
 
-    const target = await updateTargetAmount(req.params.id, targetAmount);
+    const target = await updateTargetAmount(req.user.id, req.params.id, targetAmount);
     res.json({ target: toPublicTarget(target) });
   })
 );
@@ -217,7 +222,7 @@ router.delete(
       throw new ApiError(400, 'Invalid target id.');
     }
 
-    const deleted = await deleteTarget(req.params.id);
+    const deleted = await deleteTarget(req.user.id, req.params.id);
     if (!deleted) {
       throw new ApiError(404, 'Target not found.');
     }

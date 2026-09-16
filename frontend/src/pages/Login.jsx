@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext.jsx';
-import { getRegistrationStatus } from '../api/auth.js';
 
 export default function Login() {
   const { user, isLoading, login } = useAuth();
@@ -12,25 +11,7 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  // Only offered on a fresh installation. After the first account exists
-  // the endpoint refuses anonymous callers, so a permanent link here
-  // would lead somewhere that cannot work.
-  const [canRegister, setCanRegister] = useState(false);
-
   const from = location.state?.from?.pathname || '/';
-
-  useEffect(() => {
-    let cancelled = false;
-    getRegistrationStatus()
-      .then((data) => {
-        if (!cancelled) setCanRegister(data.open);
-      })
-      // A failure here costs only the link; the sign-in form still works.
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   // Already signed in (e.g. navigated back to /login manually) — bounce away.
   useEffect(() => {
@@ -92,11 +73,9 @@ export default function Login() {
           {isSubmitting ? 'Signing in…' : 'Sign in'}
         </button>
 
-        {canRegister && (
-          <Link to="/signup" className="signup-link">
-            First time here? Set up your company
-          </Link>
-        )}
+        <Link to="/signup" className="signup-link">
+          Don&apos;t have an account? Sign up
+        </Link>
       </form>
     </div>
   );

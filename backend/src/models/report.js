@@ -23,6 +23,9 @@ import pool from '../config/db.js';
 //     Summing either column therefore already has discounts applied.
 //   * Every amount is the value snapshotted at order time, so a later price
 //     or discount change can never move a historical figure (§16).
+//   * Every report is for ONE user's orders. Each account is its own
+//     isolated workspace, so `ownerId` is the first thing every filter
+//     applies and no figure here ever mixes two users' sales.
 
 // A sale's date is when the order was SUBMITTED, not when its draft was
 // first created — an order drafted in January and submitted in February is
@@ -35,9 +38,9 @@ const VALID_SALE = "o.status = 'submitted'";
 // Builds the WHERE clause shared by every report below. `dateFrom`/`dateTo`
 // are inclusive calendar dates, compared in the database's own timezone —
 // the same reference the daily order-number sequence resets on.
-function buildFilter({ dateFrom, dateTo }, startingParams = []) {
-  const conditions = [VALID_SALE];
-  const params = [...startingParams];
+function buildFilter({ ownerId, dateFrom, dateTo }) {
+  const params = [ownerId];
+  const conditions = ['o.booker_id = $1', VALID_SALE];
 
   if (dateFrom) {
     params.push(dateFrom);
@@ -58,8 +61,8 @@ function toMoney(value) {
 // Overall totals for the selected period — the "Date-range Sales" report
 // (§18), and the same number Targets compares a monthly target against and
 // the Dashboard shows as today's/this month's sales.
-export async function getSalesSummary({ dateFrom, dateTo } = {}) {
-  const { where, params } = buildFilter({ dateFrom, dateTo });
+export async function getSalesSummary({ ownerId, dateFrom, dateTo }) {
+  const { where, params } = buildFilter({ ownerId, dateFrom, dateTo });
 
   const { rows } = await pool.query(
     `SELECT
@@ -137,9 +140,9 @@ function monthBounds(year, month) {
 // §16), so correcting a product's manufacturer moves its past sales to the
 // corrected company — which is the intended reading of "this company's
 // sales", not a loss of history: the money on each line is untouched.
-export async function getAchievedSales({ year, month, company } = {}) {
+export async function getAchievedSales({ ownerId, year, month, company }) {
   const { dateFrom, dateTo } = monthBounds(year, month);
-  const { where, params } = buildFilter({ dateFrom, dateTo });
+  const { where, params } = buildFilter({ ownerId, dateFrom, dateTo });
 
   const conditions = [where];
   const queryParams = [...params];
@@ -170,9 +173,9 @@ export async function getAchievedSales({ year, month, company } = {}) {
 // Targets are listed per company, and looking each one up separately would
 // be exactly the N+1 §35 warns against. Keyed by lower-cased company name
 // to match how targets are stored and compared.
-export async function getAchievedSalesByCompany({ year, month }) {
+export async function getAchievedSalesByCompany({ ownerId, year, month }) {
   const { dateFrom, dateTo } = monthBounds(year, month);
-  const { where, params } = buildFilter({ dateFrom, dateTo });
+  const { where, params } = buildFilter({ ownerId, dateFrom, dateTo });
 
   const { rows } = await pool.query(
     `SELECT
@@ -217,8 +220,8 @@ async function runGrouped({ select, from, groupBy, orderBy, where, params, page,
 }
 
 // Daily Sales (§18): date, number of valid orders, sales amount.
-export async function getDailySales({ dateFrom, dateTo, page, limit }) {
-  const { where, params } = buildFilter({ dateFrom, dateTo });
+export async function getDailySales({ ownerId, dateFrom, dateTo, page, limit }) {
+  const { where, params } = buildFilter({ ownerId, dateFrom, dateTo });
 
   const { rows, total } = await runGrouped({
     select: `${SALE_DATE}::date::text AS period,
@@ -240,8 +243,8 @@ export async function getDailySales({ dateFrom, dateTo, page, limit }) {
 }
 
 // Monthly Sales (§18): month, number of valid orders, sales amount.
-export async function getMonthlySales({ dateFrom, dateTo, page, limit }) {
-  const { where, params } = buildFilter({ dateFrom, dateTo });
+export async function getMonthlySales({ ownerId, dateFrom, dateTo, page, limit }) {
+  const { where, params } = buildFilter({ ownerId, dateFrom, dateTo });
 
   const { rows, total } = await runGrouped({
     select: `to_char(date_trunc('month', ${SALE_DATE}), 'YYYY-MM') AS period,
@@ -271,8 +274,8 @@ export async function getMonthlySales({ dateFrom, dateTo, page, limit }) {
 }
 
 // Customer-wise Sales (§18): customer, orders, sales.
-export async function getCustomerSales({ dateFrom, dateTo, page, limit }) {
-  const { where, params } = buildFilter({ dateFrom, dateTo });
+export async function getCustomerSales({ ownerId, dateFrom, dateTo, page, limit }) {
+  const { where, params } = buildFilter({ ownerId, dateFrom, dateTo });
 
   const { rows, total } = await runGrouped({
     select: `c.id AS customer_id, c.name AS customer_name, c.code AS customer_code,
@@ -310,8 +313,8 @@ export async function getCustomerSales({ dateFrom, dateTo, page, limit }) {
 // Grouped by product id and labelled with the product's CURRENT name and
 // code, so a renamed product stays one row instead of splitting into one
 // per historical name. The money is still every line's own snapshot.
-export async function getProductSales({ dateFrom, dateTo, page, limit }) {
-  const { where, params } = buildFilter({ dateFrom, dateTo });
+export async function getProductSales({ ownerId, dateFrom, dateTo, page, limit }) {
+  const { where, params } = buildFilter({ ownerId, dateFrom, dateTo });
 
   const { rows, total } = await runGrouped({
     select: `p.id AS product_id, p.name AS product_name, p.code AS product_code,
@@ -335,36 +338,6 @@ export async function getProductSales({ dateFrom, dateTo, page, limit }) {
       productCode: row.product_code,
       paidQty: row.paid_qty,
       bonusQty: row.bonus_qty,
-      orders: row.orders,
-      sales: toMoney(row.sales),
-    })),
-    total,
-  };
-}
-
-// Booker-wise Sales (§18): booker, orders, sales. A filter for reading the
-// numbers, not a permission boundary — there are no roles (§2).
-export async function getBookerSales({ dateFrom, dateTo, page, limit }) {
-  const { where, params } = buildFilter({ dateFrom, dateTo });
-
-  const { rows, total } = await runGrouped({
-    select: `b.id AS booker_id, b.name AS booker_name, b.username AS booker_username,
-             COUNT(*)::int AS orders,
-             COALESCE(SUM(o.total), 0) AS sales`,
-    from: 'orders o JOIN users b ON b.id = o.booker_id',
-    groupBy: 'b.id, b.name, b.username',
-    orderBy: 'COALESCE(SUM(o.total), 0) DESC, b.name ASC',
-    where,
-    params,
-    page,
-    limit,
-  });
-
-  return {
-    rows: rows.map((row) => ({
-      bookerId: row.booker_id,
-      bookerName: row.booker_name,
-      bookerUsername: row.booker_username,
       orders: row.orders,
       sales: toMoney(row.sales),
     })),

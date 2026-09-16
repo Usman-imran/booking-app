@@ -40,15 +40,11 @@ export default function Settings() {
 
     setIsSaving(true);
     try {
-      const data = await updateCompanyName(trimmed);
+      await updateCompanyName(trimmed);
       // Refreshes the session so the sidebar and any open receipt pick the
       // new name up immediately, without a reload.
       await refreshUser();
-      setSuccess(
-        data.accountsUpdated > 1
-          ? `Saved. All ${data.accountsUpdated} accounts on this installation now use this name.`
-          : 'Saved.'
-      );
+      setSuccess('Saved.');
     } catch (err) {
       setError(err.message);
     } finally {
@@ -94,9 +90,8 @@ export default function Settings() {
           </div>
 
           <p className="picker-note">
-            This is the name shown in the sidebar and printed at the top of every order receipt. It applies to
-            everyone signed in to this installation — there is one business per installation, so renaming it renames it
-            for all bookers.
+            This is the name shown in the sidebar and printed at the top of every order receipt. It applies to your
+            account only.
           </p>
           <p className="picker-note">
             Receipts are generated from the current name each time they are exported, so re-exporting an older order
@@ -137,8 +132,8 @@ export default function Settings() {
           </div>
         </dl>
         <p className="picker-note">
-          These details are set when an account is created and aren&apos;t editable here. There are no roles or
-          permissions in this application — every booker has the same access.
+          These details are set when an account is created and aren&apos;t editable here. Your customers, products,
+          orders and targets are private to your account — no other user can see them.
         </p>
       </section>
     </div>

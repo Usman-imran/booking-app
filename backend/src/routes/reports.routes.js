@@ -3,7 +3,6 @@ import asyncHandler from '../utils/asyncHandler.js';
 import ApiError from '../utils/ApiError.js';
 import authenticate from '../middleware/authenticate.js';
 import {
-  getBookerSales,
   getCustomerSales,
   getDailySales,
   getMonthlySales,
@@ -17,15 +16,18 @@ router.use(authenticate);
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-// The six reports PROJECT_SPEC.md §18 requires. "Date-range Sales" isn't a
+// The reports PROJECT_SPEC.md §18 requires. "Date-range Sales" isn't a
 // different grouping — it's the totals for a chosen period — so it maps to
 // the summary that every report already returns, with no rows of its own.
+//
+// There is no booker-wise report: every account is its own isolated
+// workspace, so every order in a report already belongs to the one user
+// reading it and the grouping would always be a single row.
 const REPORTS = {
   daily: getDailySales,
   monthly: getMonthlySales,
   customer: getCustomerSales,
   product: getProductSales,
-  booker: getBookerSales,
   range: null,
 };
 
@@ -73,7 +75,8 @@ router.get(
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
 
-    const filters = { dateFrom, dateTo };
+    // Scoped to the caller's own orders before any other filter applies.
+    const filters = { ownerId: req.user.id, dateFrom, dateTo };
 
     // The summary covers the whole period regardless of paging, so the two
     // are fetched together rather than derived from the visible rows.

@@ -1,6 +1,10 @@
 import pool from '../config/db.js';
 import { AUTO_CODE_PREFIX } from '../utils/productImport.js';
 
+// Every product belongs to exactly one user (owner_id) and is invisible to
+// everyone else. Each function here takes the owner explicitly and folds it
+// into the WHERE clause, so a product id belonging to another account
+// behaves exactly like one that doesn't exist.
 const SELECT_FIELDS =
   'id, name, code, company, packing, unit, mrp, sale_price, discount, scheme_enabled, scheme_purchase_qty, scheme_bonus_qty, is_active, created_at, updated_at';
 
@@ -19,13 +23,20 @@ const UPDATABLE_COLUMNS = {
   isActive: 'is_active',
 };
 
-export async function findProductById(id) {
-  const { rows } = await pool.query(`SELECT ${SELECT_FIELDS} FROM products WHERE id = $1`, [id]);
+export async function findProductById(ownerId, id) {
+  const { rows } = await pool.query(`SELECT ${SELECT_FIELDS} FROM products WHERE owner_id = $1 AND id = $2`, [
+    ownerId,
+    id,
+  ]);
   return rows[0] || null;
 }
 
-export async function findProductByCode(code) {
-  const { rows } = await pool.query(`SELECT ${SELECT_FIELDS} FROM products WHERE code = $1`, [code]);
+// Codes are unique per owner, not globally, so the lookup is scoped too.
+export async function findProductByCode(ownerId, code) {
+  const { rows } = await pool.query(`SELECT ${SELECT_FIELDS} FROM products WHERE owner_id = $1 AND code = $2`, [
+    ownerId,
+    code,
+  ]);
   return rows[0] || null;
 }
 
@@ -34,20 +45,24 @@ export async function findProductByCode(code) {
 // own transaction, rather than through a separate pooled connection.
 // Missing ids are simply absent from the result — the caller decides what
 // that means.
-export async function findProductsByIds(ids, client = pool) {
+export async function findProductsByIds(ownerId, ids, client = pool) {
   if (ids.length === 0) {
     return [];
   }
-  const { rows } = await client.query(`SELECT ${SELECT_FIELDS} FROM products WHERE id = ANY($1::uuid[])`, [ids]);
+  const { rows } = await client.query(
+    `SELECT ${SELECT_FIELDS} FROM products WHERE owner_id = $1 AND id = ANY($2::uuid[])`,
+    [ownerId, ids]
+  );
   return rows;
 }
 
-export async function createProduct(data) {
+export async function createProduct(ownerId, data) {
   const { rows } = await pool.query(
-    `INSERT INTO products (name, code, company, packing, unit, mrp, sale_price, discount, scheme_enabled, scheme_purchase_qty, scheme_bonus_qty)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    `INSERT INTO products (owner_id, name, code, company, packing, unit, mrp, sale_price, discount, scheme_enabled, scheme_purchase_qty, scheme_bonus_qty)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
      RETURNING ${SELECT_FIELDS}`,
     [
+      ownerId,
       data.name,
       data.code,
       data.company ?? null,
@@ -67,11 +82,14 @@ export async function createProduct(data) {
 // Looks up the products matching a set of codes. Used by the bulk import to
 // tell, in one query, which codes are already taken — rather than probing
 // once per row (PROJECT_SPEC.md §35: no N+1).
-export async function findProductsByCodes(codes, client = pool) {
+export async function findProductsByCodes(ownerId, codes, client = pool) {
   if (codes.length === 0) {
     return [];
   }
-  const { rows } = await client.query(`SELECT ${SELECT_FIELDS} FROM products WHERE code = ANY($1::text[])`, [codes]);
+  const { rows } = await client.query(
+    `SELECT ${SELECT_FIELDS} FROM products WHERE owner_id = $1 AND code = ANY($2::text[])`,
+    [ownerId, codes]
+  );
   return rows;
 }
 
@@ -82,13 +100,13 @@ export async function findProductsByCodes(codes, client = pool) {
 // Names are NOT unique in this table, so this returns every match and the
 // caller decides what an ambiguous one means — guessing which product to
 // overwrite would be the worst possible answer.
-export async function findProductsByNames(names, client = pool) {
+export async function findProductsByNames(ownerId, names, client = pool) {
   if (names.length === 0) {
     return [];
   }
   const { rows } = await client.query(
-    `SELECT ${SELECT_FIELDS} FROM products WHERE lower(name) = ANY($1::text[])`,
-    [names.map((name) => name.toLowerCase())]
+    `SELECT ${SELECT_FIELDS} FROM products WHERE owner_id = $1 AND lower(name) = ANY($2::text[])`,
+    [ownerId, names.map((name) => name.toLowerCase())]
   );
   return rows;
 }
@@ -98,21 +116,24 @@ export async function findProductsByNames(names, client = pool) {
 // Runs on the caller's transaction and starts by taking a transaction-level
 // advisory lock, so two imports uploaded at the same moment queue up instead
 // of both reading the same highest code and generating the same numbers.
-// The lock is released automatically at COMMIT or ROLLBACK.
+// The lock is released automatically at COMMIT or ROLLBACK. It is keyed by
+// owner, because codes are unique per owner: two different users importing
+// at once never contend, and each gets their own PROD-0001.
 //
-// Numbering continues from the highest PROD-##### already in the table, so
-// codes are never reused even after products are edited or removed. Codes
-// supplied explicitly in the same file are skipped, since those rows are
-// about to claim them.
-async function generateProductCodes(client, count, reservedCodes) {
+// Numbering continues from the highest PROD-##### already in this owner's
+// products, so codes are never reused even after products are edited or
+// removed. Codes supplied explicitly in the same file are skipped, since
+// those rows are about to claim them.
+async function generateProductCodes(client, ownerId, count, reservedCodes) {
   if (count === 0) return [];
 
-  await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['product_code_generation']);
+  await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`product_code_generation:${ownerId}`]);
 
   const { rows } = await client.query(
     `SELECT COALESCE(MAX((substring(code from '^${AUTO_CODE_PREFIX}([0-9]+)$'))::bigint), 0) AS max_suffix
      FROM products
-     WHERE code ~ '^${AUTO_CODE_PREFIX}[0-9]+$'`
+     WHERE owner_id = $1 AND code ~ '^${AUTO_CODE_PREFIX}[0-9]+$'`,
+    [ownerId]
   );
 
   let next = Number(rows[0].max_suffix) + 1;
@@ -145,7 +166,7 @@ async function generateProductCodes(client, count, reservedCodes) {
 // code is the identity the unique constraint rests on, and reactivating a
 // deliberately deactivated product is not something a price list should do
 // silently.
-export async function bulkUpsertProducts({ inserts = [], updates = [] }) {
+export async function bulkUpsertProducts(ownerId, { inserts = [], updates = [] }) {
   if (inserts.length === 0 && updates.length === 0) {
     return { inserted: [], updated: [] };
   }
@@ -158,6 +179,7 @@ export async function bulkUpsertProducts({ inserts = [], updates = [] }) {
     if (needsCode.length > 0) {
       const generated = await generateProductCodes(
         client,
+        ownerId,
         needsCode.length,
         inserts.map((row) => row.code).filter(Boolean)
       );
@@ -169,6 +191,7 @@ export async function bulkUpsertProducts({ inserts = [], updates = [] }) {
     let inserted = [];
     if (inserts.length > 0) {
       const columns = [
+        'owner_id',
         'name',
         'code',
         'company',
@@ -186,6 +209,7 @@ export async function bulkUpsertProducts({ inserts = [], updates = [] }) {
       const valueGroups = inserts.map((data) => {
         const offset = params.length;
         params.push(
+          ownerId,
           data.name,
           data.code,
           data.company ?? null,
@@ -230,9 +254,13 @@ export async function bulkUpsertProducts({ inserts = [], updates = [] }) {
 
       if (setClauses.length === 0) continue;
 
-      params.push(productId);
+      // The owner check is belt and braces: the ids came from this owner's
+      // own lookups, but a row can never be rewritten across accounts.
+      params.push(ownerId, productId);
       const result = await client.query(
-        `UPDATE products SET ${setClauses.join(', ')} WHERE id = $${params.length} RETURNING ${SELECT_FIELDS}`,
+        `UPDATE products SET ${setClauses.join(', ')}
+         WHERE owner_id = $${params.length - 1} AND id = $${params.length}
+         RETURNING ${SELECT_FIELDS}`,
         params
       );
       if (result.rows[0]) updated.push(result.rows[0]);
@@ -249,7 +277,7 @@ export async function bulkUpsertProducts({ inserts = [], updates = [] }) {
 }
 
 // Applies only the fields present in `data` (partial update).
-export async function updateProduct(id, data) {
+export async function updateProduct(ownerId, id, data) {
   const setClauses = [];
   const params = [];
 
@@ -261,28 +289,30 @@ export async function updateProduct(id, data) {
   }
 
   if (setClauses.length === 0) {
-    return findProductById(id);
+    return findProductById(ownerId, id);
   }
 
-  params.push(id);
+  params.push(ownerId, id);
   const { rows } = await pool.query(
-    `UPDATE products SET ${setClauses.join(', ')} WHERE id = $${params.length} RETURNING ${SELECT_FIELDS}`,
+    `UPDATE products SET ${setClauses.join(', ')}
+     WHERE owner_id = $${params.length - 1} AND id = $${params.length}
+     RETURNING ${SELECT_FIELDS}`,
     params
   );
   return rows[0] || null;
 }
 
-export async function deactivateProduct(id) {
+export async function deactivateProduct(ownerId, id) {
   const { rows } = await pool.query(
-    `UPDATE products SET is_active = false WHERE id = $1 RETURNING ${SELECT_FIELDS}`,
-    [id]
+    `UPDATE products SET is_active = false WHERE owner_id = $1 AND id = $2 RETURNING ${SELECT_FIELDS}`,
+    [ownerId, id]
   );
   return rows[0] || null;
 }
 
-export async function listProducts({ search, isActive, ids, company, page, limit }) {
-  const conditions = [];
-  const params = [];
+export async function listProducts(ownerId, { search, isActive, ids, company, page, limit }) {
+  const params = [ownerId];
+  const conditions = ['owner_id = $1'];
 
   // Restricts the list to a specific set of products. Used when a saved
   // draft is reopened and every line has to be re-priced from the products'
@@ -311,7 +341,7 @@ export async function listProducts({ search, isActive, ids, company, page, limit
     conditions.push(`lower(company) = lower($${params.length})`);
   }
 
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const whereClause = `WHERE ${conditions.join(' AND ')}`;
 
   const countResult = await pool.query(`SELECT COUNT(*)::int AS total FROM products ${whereClause}`, params);
   const total = countResult.rows[0].total;
@@ -331,9 +361,12 @@ export async function listProducts({ search, isActive, ids, company, page, limit
 // targets are set against these names (PROJECT_SPEC.md §19 as extended), and
 // there is no companies table to read them from — Company is a field on the
 // product (§5), so this is the list.
-export async function listProductCompanies() {
+export async function listProductCompanies(ownerId) {
   const { rows } = await pool.query(
-    `SELECT DISTINCT company FROM products WHERE company IS NOT NULL AND btrim(company) <> '' ORDER BY company ASC`
+    `SELECT DISTINCT company FROM products
+     WHERE owner_id = $1 AND company IS NOT NULL AND btrim(company) <> ''
+     ORDER BY company ASC`,
+    [ownerId]
   );
   return rows.map((row) => row.company);
 }
@@ -346,13 +379,14 @@ export async function listProductCompanies() {
 // table (§21, §27) — so the list is derived from the products themselves.
 // A manufacturer whose products have all been deactivated therefore drops
 // out of the list, which is the intent: it has nothing left to sell.
-export async function listCompaniesWithCounts() {
+export async function listCompaniesWithCounts(ownerId) {
   const { rows } = await pool.query(
     `SELECT company, COUNT(*)::int AS product_count
      FROM products
-     WHERE is_active = true AND company IS NOT NULL AND btrim(company) <> ''
+     WHERE owner_id = $1 AND is_active = true AND company IS NOT NULL AND btrim(company) <> ''
      GROUP BY company
-     ORDER BY company ASC`
+     ORDER BY company ASC`,
+    [ownerId]
   );
   return rows.map((row) => ({ company: row.company, productCount: row.product_count }));
 }

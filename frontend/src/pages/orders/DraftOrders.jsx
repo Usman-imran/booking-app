@@ -169,7 +169,6 @@ export default function DraftOrders() {
                 <tr>
                   <th>Saved</th>
                   <th>Customer</th>
-                  <th>Booker</th>
                   <th className="numeric">Items</th>
                   <th className="numeric">Total</th>
                   <th>Remarks</th>
@@ -184,7 +183,6 @@ export default function DraftOrders() {
                       <Link to={`/orders/${draft.id}`}>{draft.customer.name}</Link>
                       <div className="muted">{draft.customer.code}</div>
                     </td>
-                    <td>{draft.booker.name}</td>
                     <td className="numeric">{draft.itemCount}</td>
                     <td className="numeric">{formatMoney(draft.total)}</td>
                     <td className="cell-truncate" title={draft.remarks || ''}>

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { cancelOrder, listOrders } from '../../api/orders.js';
-import { listBookers } from '../../api/users.js';
 import ConfirmDialog from '../../components/ConfirmDialog.jsx';
 import CustomerPicker from './CustomerPicker.jsx';
 import OrderStatusBadge from './OrderStatusBadge.jsx';
@@ -18,7 +17,6 @@ const ALL_STATUSES = 'submitted,cancelled';
 const EMPTY_FILTERS = {
   status: ALL_STATUSES,
   customer: null,
-  bookerId: '',
   dateFrom: '',
   dateTo: '',
 };
@@ -51,8 +49,6 @@ export default function OrderList() {
   const [status, setStatus] = useState('loading');
   const [error, setError] = useState(null);
 
-  const [bookers, setBookers] = useState([]);
-
   // Holds the order id whose receipt is open. The list only carries
   // summaries, so the modal fetches the full order (with its lines) itself.
   const [receiptOrderId, setReceiptOrderId] = useState(null);
@@ -70,22 +66,6 @@ export default function OrderList() {
     return () => clearTimeout(timer);
   }, [searchInput]);
 
-  // Loaded once — the Booker filter needs names, not ids. A failure here
-  // only costs that one filter, so it must not take the page down with it.
-  useEffect(() => {
-    let cancelled = false;
-    listBookers()
-      .then((data) => {
-        if (!cancelled) setBookers(data.users);
-      })
-      .catch(() => {
-        if (!cancelled) setBookers([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   const fetchOrders = useCallback(async () => {
     setStatus('loading');
     setError(null);
@@ -96,7 +76,6 @@ export default function OrderList() {
         search,
         status: filters.status,
         customerId: filters.customer?.id,
-        bookerId: filters.bookerId || undefined,
         dateFrom: filters.dateFrom || undefined,
         dateTo: filters.dateTo || undefined,
       });
@@ -160,7 +139,6 @@ export default function OrderList() {
     Boolean(search) ||
     filters.status !== ALL_STATUSES ||
     Boolean(filters.customer) ||
-    Boolean(filters.bookerId) ||
     Boolean(filters.dateFrom) ||
     Boolean(filters.dateTo);
 
@@ -210,19 +188,6 @@ export default function OrderList() {
             <option value={ALL_STATUSES}>All orders</option>
             <option value="submitted">Submitted</option>
             <option value="cancelled">Cancelled</option>
-          </select>
-        </label>
-
-        <label className="filter-field">
-          Booker
-          <select value={filters.bookerId} onChange={(event) => updateFilter({ bookerId: event.target.value })}>
-            <option value="">All bookers</option>
-            {bookers.map((booker) => (
-              <option key={booker.id} value={booker.id}>
-                {booker.name}
-                {booker.isActive ? '' : ' (inactive)'}
-              </option>
-            ))}
           </select>
         </label>
 
@@ -293,7 +258,6 @@ export default function OrderList() {
                   <th>Order #</th>
                   <th>Date</th>
                   <th>Customer</th>
-                  <th>Booker</th>
                   <th className="numeric">Items</th>
                   <th className="numeric">Total</th>
                   <th>Status</th>
@@ -313,7 +277,6 @@ export default function OrderList() {
                         {order.customer.name}
                         <div className="muted">{order.customer.code}</div>
                       </td>
-                      <td>{order.booker.name}</td>
                       <td className="numeric">{order.itemCount}</td>
                       <td className={isCancelled ? 'numeric value-void' : 'numeric'}>{formatMoney(order.total)}</td>
                       <td>

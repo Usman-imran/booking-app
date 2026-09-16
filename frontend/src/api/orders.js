@@ -20,8 +20,8 @@ export function createOrder({ customerId, status, remarks, items }) {
   return apiClient.post('/orders', { customerId, status, remarks, items });
 }
 
-export function listOrders({ page = 1, limit = 20, search, status, customerId, bookerId, dateFrom, dateTo } = {}) {
-  return apiClient.get(`/orders${buildQuery({ page, limit, search, status, customerId, bookerId, dateFrom, dateTo })}`);
+export function listOrders({ page = 1, limit = 20, search, status, customerId, dateFrom, dateTo } = {}) {
+  return apiClient.get(`/orders${buildQuery({ page, limit, search, status, customerId, dateFrom, dateTo })}`);
 }
 
 export function getOrder(id) {

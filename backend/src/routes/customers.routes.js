@@ -14,7 +14,8 @@ import {
 
 const router = Router();
 
-// Every customer endpoint requires a logged-in booker.
+// Every customer endpoint requires a logged-in user, and every query below
+// is scoped to that user's own customers (req.user.id is the owner).
 router.use(authenticate);
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -106,13 +107,13 @@ router.post(
       throw new ApiError(400, errors[0], errors);
     }
 
-    if (await findCustomerByCode(data.code)) {
+    if (await findCustomerByCode(req.user.id, data.code)) {
       throw new ApiError(409, 'Customer code already exists.');
     }
 
     let customer;
     try {
-      customer = await createCustomer(data);
+      customer = await createCustomer(req.user.id, data);
     } catch (err) {
       if (err.code === '23505') {
         throw new ApiError(409, 'Customer code already exists.');
@@ -141,7 +142,7 @@ router.get(
 
     const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
 
-    const { rows, total } = await listCustomers({ search: search || undefined, isActive, page, limit });
+    const { rows, total } = await listCustomers(req.user.id, { search: search || undefined, isActive, page, limit });
 
     res.json({
       customers: rows.map(toPublicCustomer),
@@ -160,7 +161,7 @@ router.get(
   asyncHandler(async (req, res) => {
     requireValidId(req.params.id);
 
-    const customer = await findCustomerById(req.params.id);
+    const customer = await findCustomerById(req.user.id, req.params.id);
     if (!customer) {
       throw new ApiError(404, 'Customer not found.');
     }
@@ -174,7 +175,7 @@ router.put(
   asyncHandler(async (req, res) => {
     requireValidId(req.params.id);
 
-    const existing = await findCustomerById(req.params.id);
+    const existing = await findCustomerById(req.user.id, req.params.id);
     if (!existing) {
       throw new ApiError(404, 'Customer not found.');
     }
@@ -189,7 +190,7 @@ router.put(
     }
 
     if (data.code && data.code !== existing.code) {
-      const codeOwner = await findCustomerByCode(data.code);
+      const codeOwner = await findCustomerByCode(req.user.id, data.code);
       if (codeOwner && codeOwner.id !== existing.id) {
         throw new ApiError(409, 'Customer code already exists.');
       }
@@ -197,7 +198,7 @@ router.put(
 
     let updated;
     try {
-      updated = await updateCustomer(req.params.id, data);
+      updated = await updateCustomer(req.user.id, req.params.id, data);
     } catch (err) {
       if (err.code === '23505') {
         throw new ApiError(409, 'Customer code already exists.');
@@ -214,7 +215,7 @@ router.delete(
   asyncHandler(async (req, res) => {
     requireValidId(req.params.id);
 
-    const updated = await deactivateCustomer(req.params.id);
+    const updated = await deactivateCustomer(req.user.id, req.params.id);
     if (!updated) {
       throw new ApiError(404, 'Customer not found.');
     }

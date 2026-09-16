@@ -34,16 +34,18 @@ router.get(
   '/',
   asyncHandler(async (req, res) => {
     const period = await getCurrentPeriod();
+    // Every figure is the signed-in user's own.
+    const ownerId = req.user.id;
 
     const [today, monthProgress, draftOrders, recent] = await Promise.all([
-      getSalesSummary({ dateFrom: period.date, dateTo: period.date }),
+      getSalesSummary({ ownerId, dateFrom: period.date, dateTo: period.date }),
       // Carries the month's sales AND its target in one pass — the same
       // numbers the Targets page shows for this month.
-      getMonthProgress({ year: period.year, month: period.month, includeCompanies: false }),
-      countOrdersByStatus(['draft']),
+      getMonthProgress({ ownerId, year: period.year, month: period.month, includeCompanies: false }),
+      countOrdersByStatus(ownerId, ['draft']),
       // Drafts are excluded: they aren't orders yet, and they have their own
       // count above and their own page.
-      listOrders({ statuses: ['submitted', 'cancelled'], page: 1, limit: RECENT_ORDER_LIMIT }),
+      listOrders(ownerId, { statuses: ['submitted', 'cancelled'], page: 1, limit: RECENT_ORDER_LIMIT }),
     ]);
 
     res.json({

@@ -2,16 +2,9 @@ import { Router } from 'express';
 import asyncHandler from '../utils/asyncHandler.js';
 import ApiError from '../utils/ApiError.js';
 import authenticate from '../middleware/authenticate.js';
-import {
-  countUsers,
-  createUser,
-  findUserById,
-  findUserByUsername,
-  setCompanyNameForAllUsers,
-  toPublicUser,
-} from '../models/user.js';
+import { createUser, findUserByUsername, setCompanyName, toPublicUser } from '../models/user.js';
 import { hashPassword, verifyPassword } from '../utils/password.js';
-import { signAuthToken, verifyAuthToken } from '../utils/jwt.js';
+import { signAuthToken } from '../utils/jwt.js';
 
 const router = Router();
 
@@ -32,61 +25,15 @@ function readRequiredString(body, field, errors) {
   return trimmed;
 }
 
-// Registration.
+// Registration is open: anyone who reaches the app can create an account
+// and is signed straight in. Each account is its own isolated workspace —
+// its customers, products, orders and targets are visible to it alone.
 //
-// There is no user-management module in this application and none is planned
-// (PROJECT_SPEC.md §2: no roles, no permissions), which leaves one problem:
-// every authenticated booker can read every customer, order and sales
-// figure, so an endpoint that lets anyone create an account would hand the
-// whole business's data to whoever finds the URL.
-//
-// So registration is open only while the system is EMPTY — the first
-// account, which sets the company name the app is branded with — and
-// requires an existing booker to be signed in after that. That keeps
-// self-service first-run setup without leaving the door open behind it.
-async function requireRegistrationAllowed(req) {
-  if ((await countUsers()) === 0) return;
-
-  const [scheme, token] = (req.headers.authorization || '').split(' ');
-  if (scheme !== 'Bearer' || !token) {
-    throw new ApiError(
-      401,
-      'Sign in first — once the first account exists, only a signed-in booker can add another.'
-    );
-  }
-
-  try {
-    const payload = verifyAuthToken(token);
-    const user = await findUserById(payload.sub);
-    if (!user || !user.is_active) throw new Error('inactive');
-  } catch {
-    throw new ApiError(401, 'Invalid or expired token.');
-  }
-}
-
-// GET /api/auth/registration-status
-//
-// Whether an account can be created right now without signing in — i.e.
-// whether this is a fresh installation. Public, so the sign-in page can
-// offer a "create the first account" link only when it would actually
-// work, instead of dangling one that 401s.
-//
-// It reveals only whether the system has any users at all, which the login
-// page already implies.
-router.get(
-  '/registration-status',
-  asyncHandler(async (req, res) => {
-    res.json({ open: (await countUsers()) === 0 });
-  })
-);
-
 // POST /api/auth/register
 // Body: { name, username, password, companyName, phone? }
 router.post(
   '/register',
   asyncHandler(async (req, res) => {
-    await requireRegistrationAllowed(req);
-
     const body = req.body ?? {};
     const errors = [];
 
@@ -135,7 +82,7 @@ router.post(
       throw err;
     }
 
-    // Signed straight in, so first-run setup doesn't need a second step.
+    // Signed straight in, so signing up doesn't need a second step.
     const token = signAuthToken({ sub: user.id, companyName: user.company_name });
 
     res.status(201).json({ token, user: toPublicUser(user) });
@@ -180,10 +127,8 @@ router.get('/me', authenticate, (req, res) => {
 // it changes what the app calls itself in the sidebar and at the top of
 // every order receipt. Nothing about customers, products or orders moves.
 //
-// It applies to every account, because there is one business per
-// installation (§1) — see setCompanyNameForAllUsers. Any signed-in booker
-// may change it; this application has no roles and inventing an admin
-// concept for one field would contradict §2.
+// It applies to the signed-in account only — each account is its own
+// workspace, so nobody's rename can touch anyone else's branding.
 //
 // Historical receipts are NOT rewritten: a receipt is generated from the
 // current name each time it is exported, so re-exporting an old order shows
@@ -203,12 +148,10 @@ router.put(
       throw new ApiError(400, `companyName must be at most ${FIELD_LIMITS.companyName} characters.`);
     }
 
-    const updated = await setCompanyNameForAllUsers(companyName);
-
-    // Re-read rather than patching the cached request user, so the response
-    // reflects what is actually stored.
-    const user = await findUserById(req.user.id);
-    res.json({ user: toPublicUser(user), accountsUpdated: updated });
+    // RETURNING gives back what is actually stored, rather than patching
+    // the cached request user.
+    const user = await setCompanyName(req.user.id, companyName);
+    res.json({ user: toPublicUser(user) });
   })
 );
 

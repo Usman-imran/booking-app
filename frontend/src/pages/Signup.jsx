@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { getRegistrationStatus, register } from '../api/auth.js';
+import { register } from '../api/auth.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 
 const MIN_PASSWORD_LENGTH = 8;
@@ -14,49 +14,26 @@ const EMPTY_FORM = {
   phone: '',
 };
 
-// Account creation.
-//
-// The page serves the two cases the API allows, and says which one it is in
-// rather than presenting one form that sometimes fails:
-//
-//   * FIRST RUN — no users exist yet. Anyone can create the account that
-//     names the business, and is signed straight in.
-//   * ADDING A COLLEAGUE — a signed-in booker creates another account. The
-//     new account's session is deliberately NOT adopted; switching the
-//     current booker into it would be a surprising way to log them out.
-//
-// Anyone else is told to sign in first, because the API will refuse them.
+// Account creation. Registration is open to anyone, and every account is
+// its own private workspace: the customers, products, orders and targets
+// created under it are visible to that account alone. A new account is
+// signed straight in.
 export default function Signup() {
   const { user, isLoading, adoptSession } = useAuth();
   const navigate = useNavigate();
 
-  const [isOpen, setIsOpen] = useState(null); // null while unknown
-  const [statusError, setStatusError] = useState(null);
   const [values, setValues] = useState(EMPTY_FORM);
   const [error, setError] = useState(null);
-  const [created, setCreated] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Signed in already means this is a booker adding a colleague, not
-  // someone setting the business up.
-  const isAddingColleague = Boolean(user);
-
+  // Already signed in — there is nothing to do here; an account can't add
+  // another one (each is fully separate), so bounce to the dashboard.
   useEffect(() => {
-    let cancelled = false;
-    getRegistrationStatus()
-      .then((data) => {
-        if (!cancelled) setIsOpen(data.open);
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setStatusError(err.message);
-          setIsOpen(false);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    if (!isLoading && user) {
+      navigate('/', { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoading, user]);
 
   function handleChange(field) {
     return (event) => setValues((current) => ({ ...current, [field]: event.target.value }));
@@ -95,14 +72,8 @@ export default function Signup() {
         phone: values.phone.trim() || undefined,
       });
 
-      if (isAddingColleague) {
-        // Stay signed in as the current booker.
-        setCreated(data.user);
-        setValues(EMPTY_FORM);
-      } else {
-        adoptSession(data.token, data.user);
-        navigate('/', { replace: true });
-      }
+      adoptSession(data.token, data.user);
+      navigate('/', { replace: true });
     } catch (err) {
       setError(err.message);
     } finally {
@@ -110,7 +81,9 @@ export default function Signup() {
     }
   }
 
-  if (isLoading || isOpen === null) {
+  // Wait for session hydration so a signed-in user is redirected rather
+  // than shown a form for a moment.
+  if (isLoading || user) {
     return (
       <div className="login-page">
         <div className="login-card">Loading…</div>
@@ -118,45 +91,14 @@ export default function Signup() {
     );
   }
 
-  // Not signed in, and the business already has an account: the API would
-  // refuse this, so say so instead of showing a form that can't succeed.
-  if (!isOpen && !isAddingColleague) {
-    return (
-      <div className="login-page">
-        <div className="login-card">
-          <h1>Accounts are already set up</h1>
-          <p className="login-subtitle">
-            This installation already has at least one booker, so new accounts are added from inside the app. Sign in
-            first, then come back here to add a colleague.
-          </p>
-          {statusError && (
-            <div className="login-error" role="alert">
-              Could not check registration status: {statusError}
-            </div>
-          )}
-          <Link to="/login" className="btn-primary signup-block-action">
-            Go to sign in
-          </Link>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="login-page">
       <form className="login-card login-card-wide" onSubmit={handleSubmit}>
-        <h1>{isAddingColleague ? 'Add a booker' : 'Create your account'}</h1>
+        <h1>Create your account</h1>
         <p className="login-subtitle">
-          {isAddingColleague
-            ? 'The new booker can sign in immediately and has the same access you do — there are no roles in this application.'
-            : 'This is the first account. Your company name brands the app and every order receipt it prints.'}
+          Your company name brands the app and every order receipt it prints. Everything you add is private to your
+          account.
         </p>
-
-        {created && (
-          <div className="signup-success" role="status">
-            <strong>{created.name}</strong> can now sign in as <strong>{created.username}</strong>.
-          </div>
-        )}
 
         {error && (
           <div className="login-error" role="alert">
@@ -226,11 +168,11 @@ export default function Signup() {
         </p>
 
         <button type="submit" disabled={isSubmitting}>
-          {isSubmitting ? 'Creating…' : isAddingColleague ? 'Create booker' : 'Create account'}
+          {isSubmitting ? 'Creating…' : 'Create account'}
         </button>
 
-        <Link to={isAddingColleague ? '/' : '/login'} className="signup-link">
-          {isAddingColleague ? 'Back to the dashboard' : 'I already have an account'}
+        <Link to="/login" className="signup-link">
+          I already have an account
         </Link>
       </form>
     </div>

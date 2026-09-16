@@ -18,7 +18,8 @@ import { toPublicOrderItem } from '../models/orderItem.js';
 const router = Router();
 
 // Every order endpoint requires a logged-in booker — the authenticated user
-// is also who the order is recorded against (PROJECT_SPEC.md §2).
+// is also who the order is recorded against (PROJECT_SPEC.md §2), and the
+// only user who can ever see or change it.
 router.use(authenticate);
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -235,7 +236,7 @@ router.post(
 
     // Re-read so a created order comes back in exactly the same shape as
     // GET /api/orders/:id, customer/booker details and all.
-    const details = await findOrderDetailsById(order.id);
+    const details = await findOrderDetailsById(req.user.id, order.id);
     res.status(201).json({ order: toOrderDetailsResponse(details) });
   })
 );
@@ -244,14 +245,15 @@ router.post(
 // (PROJECT_SPEC.md §17). All filters combine.
 //
 // Query: page, limit, search (order number / customer name / customer code),
-// status, customerId, bookerId, dateFrom, dateTo (inclusive, YYYY-MM-DD).
+// status, customerId, dateFrom, dateTo (inclusive, YYYY-MM-DD). There is no
+// booker filter: every order listed is the caller's own.
 router.get(
   '/',
   asyncHandler(async (req, res) => {
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 100);
 
-    const { status, customerId, bookerId, dateFrom, dateTo } = req.query;
+    const { status, customerId, dateFrom, dateTo } = req.query;
 
     // Accepts one status or a comma-separated list, so the Orders module
     // can ask for submitted and cancelled orders together while Draft
@@ -275,10 +277,6 @@ router.get(
       throw new ApiError(400, 'customerId must be a valid id.');
     }
 
-    if (bookerId !== undefined && !UUID_RE.test(bookerId)) {
-      throw new ApiError(400, 'bookerId must be a valid id.');
-    }
-
     for (const [field, value] of [
       ['dateFrom', dateFrom],
       ['dateTo', dateTo],
@@ -290,11 +288,10 @@ router.get(
 
     const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
 
-    const { rows, total } = await listOrders({
+    const { rows, total } = await listOrders(req.user.id, {
       search: search || undefined,
       statuses,
       customerId,
-      bookerId,
       dateFrom,
       dateTo,
       page,
@@ -332,13 +329,14 @@ router.put(
     }
 
     await updateDraftOrder({
+      ownerId: req.user.id,
       orderId: req.params.id,
       customerId: data.customerId,
       remarks: data.remarks,
       items: data.items,
     });
 
-    const details = await findOrderDetailsById(req.params.id);
+    const details = await findOrderDetailsById(req.user.id, req.params.id);
     res.json({ order: toOrderDetailsResponse(details) });
   })
 );
@@ -356,7 +354,7 @@ router.post(
     requireValidId(req.params.id);
 
     try {
-      await submitOrder(req.params.id);
+      await submitOrder(req.user.id, req.params.id);
     } catch (err) {
       if (err.code === ORDER_NUMBER_EXHAUSTED) {
         throw new ApiError(503, 'The daily order number limit has been reached. Please try again tomorrow.');
@@ -364,7 +362,7 @@ router.post(
       throw err;
     }
 
-    const details = await findOrderDetailsById(req.params.id);
+    const details = await findOrderDetailsById(req.user.id, req.params.id);
     res.json({ order: toOrderDetailsResponse(details) });
   })
 );
@@ -381,7 +379,7 @@ router.delete(
   asyncHandler(async (req, res) => {
     requireValidId(req.params.id);
 
-    const deleted = await deleteDraftOrder(req.params.id);
+    const deleted = await deleteDraftOrder(req.user.id, req.params.id);
     res.json({ order: toPublicOrder(deleted) });
   })
 );
@@ -399,11 +397,11 @@ router.post(
   asyncHandler(async (req, res) => {
     requireValidId(req.params.id);
 
-    // Recorded against the authenticated booker, never one named by the
-    // client.
-    await cancelOrder(req.params.id, req.user.id);
+    // Only the order's own booker can cancel it, and the cancellation is
+    // recorded against them — never a user named by the client.
+    await cancelOrder(req.user.id, req.params.id);
 
-    const details = await findOrderDetailsById(req.params.id);
+    const details = await findOrderDetailsById(req.user.id, req.params.id);
     res.json({ order: toOrderDetailsResponse(details) });
   })
 );
@@ -415,7 +413,7 @@ router.get(
   asyncHandler(async (req, res) => {
     requireValidId(req.params.id);
 
-    const details = await findOrderDetailsById(req.params.id);
+    const details = await findOrderDetailsById(req.user.id, req.params.id);
     if (!details) {
       throw new ApiError(404, 'Order not found.');
     }

@@ -77,16 +77,6 @@ const TABS = [
     ],
   },
   {
-    id: 'booker',
-    label: 'Booker-wise',
-    empty: 'No booker had sales in this period.',
-    columns: [
-      { key: 'bookerName', header: 'Booker' },
-      { key: 'orders', header: 'Orders', numeric: true },
-      { key: 'sales', header: 'Sales', numeric: true, money: true },
-    ],
-  },
-  {
     id: 'range',
     label: 'Date Range',
     // The date-range report IS the summary for the chosen period, so it has
@@ -310,7 +300,7 @@ export default function SalesReports() {
             <div className="page-placeholder">
               {summary.orders === 0
                 ? 'No sales in this period.'
-                : 'The totals above are the sales for the selected period. Pick another tab to break them down by day, month, customer, product or booker.'}
+                : 'The totals above are the sales for the selected period. Pick another tab to break them down by day, month, customer or product.'}
             </div>
           )}
 
@@ -333,7 +323,7 @@ export default function SalesReports() {
                   </thead>
                   <tbody>
                     {report.rows.map((row, index) => (
-                      <tr key={row.customerId ?? row.productId ?? row.bookerId ?? row.period ?? index}>
+                      <tr key={row.customerId ?? row.productId ?? row.period ?? index}>
                         {tab.columns.map((column) => (
                           <td
                             key={column.key}

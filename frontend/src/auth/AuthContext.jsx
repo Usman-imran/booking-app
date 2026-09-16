@@ -48,12 +48,8 @@ export function AuthProvider({ children }) {
     setUser(data.user);
   }, []);
 
-  // Adopts a session the caller already obtained — used by first-run signup,
-  // where /auth/register hands back a token for the account it just created.
-  //
-  // Deliberately separate from login(): an existing booker adding a
-  // colleague also gets a token back, and must NOT be switched into the new
-  // account. Only the caller knows which case it is.
+  // Adopts a session the caller already obtained — used by signup, where
+  // /auth/register hands back a token for the account it just created.
   const adoptSession = useCallback((token, nextUser) => {
     localStorage.setItem(TOKEN_STORAGE_KEY, token);
     setAuthToken(token);

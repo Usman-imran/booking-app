@@ -12,7 +12,7 @@ function buildQuery(params) {
 }
 
 // Sales reports (PROJECT_SPEC.md §18). `type` picks the grouping:
-// daily | monthly | customer | product | booker | range.
+// daily | monthly | customer | product | range.
 //
 // Every figure comes from the backend's single definition of a valid sale
 // (§34) — submitted orders only, bonus quantities worth nothing, discounts

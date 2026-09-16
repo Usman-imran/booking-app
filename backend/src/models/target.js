@@ -11,6 +11,10 @@ import { getAchievedSales, getAchievedSalesByCompany } from './report.js';
 // Achieved figures are never computed here — they come from report.js, the
 // single definition of a valid sale, so a target and a sales report can
 // never disagree about the same month (§34).
+//
+// Targets belong to one user (owner_id), like everything else: each account
+// sets its own targets and they are measured against that account's own
+// sales. Every function takes the owner explicitly.
 
 const SELECT_FIELDS = 'id, year, month, company, target_amount, created_at, updated_at';
 
@@ -57,39 +61,42 @@ export function computeProgress({ targetAmount, achieved }) {
   };
 }
 
-export async function findTargetById(id) {
-  const { rows } = await pool.query(`SELECT ${SELECT_FIELDS} FROM monthly_targets WHERE id = $1`, [id]);
+export async function findTargetById(ownerId, id) {
+  const { rows } = await pool.query(`SELECT ${SELECT_FIELDS} FROM monthly_targets WHERE owner_id = $1 AND id = $2`, [
+    ownerId,
+    id,
+  ]);
   return rows[0] || null;
 }
 
 // Looks a target up by its scope rather than its id. `company` omitted (or
 // null) means the month's overall target. Matched case-insensitively, the
 // same way the unique index is built, so 'GSK' and 'gsk' are one target.
-export async function findTargetByScope({ year, month, company }) {
+export async function findTargetByScope({ ownerId, year, month, company }) {
   const { rows } = await pool.query(
     `SELECT ${SELECT_FIELDS} FROM monthly_targets
-     WHERE year = $1 AND month = $2 AND lower(coalesce(company, '')) = lower(coalesce($3, ''))`,
-    [year, month, company ?? null]
+     WHERE owner_id = $1 AND year = $2 AND month = $3 AND lower(coalesce(company, '')) = lower(coalesce($4, ''))`,
+    [ownerId, year, month, company ?? null]
   );
   return rows[0] || null;
 }
 
-export async function listTargetsForMonth({ year, month }) {
+export async function listTargetsForMonth({ ownerId, year, month }) {
   const { rows } = await pool.query(
     `SELECT ${SELECT_FIELDS} FROM monthly_targets
-     WHERE year = $1 AND month = $2
+     WHERE owner_id = $1 AND year = $2 AND month = $3
      ORDER BY company NULLS FIRST`,
-    [year, month]
+    [ownerId, year, month]
   );
   return rows;
 }
 
-export async function createTarget({ year, month, company, targetAmount }) {
+export async function createTarget({ ownerId, year, month, company, targetAmount }) {
   const { rows } = await pool.query(
-    `INSERT INTO monthly_targets (year, month, company, target_amount)
-     VALUES ($1, $2, $3, $4)
+    `INSERT INTO monthly_targets (owner_id, year, month, company, target_amount)
+     VALUES ($1, $2, $3, $4, $5)
      RETURNING ${SELECT_FIELDS}`,
-    [year, month, company ?? null, targetAmount]
+    [ownerId, year, month, company ?? null, targetAmount]
   );
   return rows[0];
 }
@@ -100,28 +107,31 @@ export async function createTarget({ year, month, company, targetAmount }) {
 //
 // The conflict target is the unique index's expression, so an upsert lands
 // on the same row whether the company was typed 'GSK' or 'gsk'.
-export async function upsertTarget({ year, month, company, targetAmount }) {
+export async function upsertTarget({ ownerId, year, month, company, targetAmount }) {
   const { rows } = await pool.query(
-    `INSERT INTO monthly_targets (year, month, company, target_amount)
-     VALUES ($1, $2, $3, $4)
-     ON CONFLICT (year, month, (lower(coalesce(company, ''))))
+    `INSERT INTO monthly_targets (owner_id, year, month, company, target_amount)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (owner_id, year, month, (lower(coalesce(company, ''))))
      DO UPDATE SET target_amount = EXCLUDED.target_amount
      RETURNING ${SELECT_FIELDS}`,
-    [year, month, company ?? null, targetAmount]
+    [ownerId, year, month, company ?? null, targetAmount]
   );
   return rows[0];
 }
 
-export async function updateTargetAmount(id, targetAmount) {
+export async function updateTargetAmount(ownerId, id, targetAmount) {
   const { rows } = await pool.query(
-    `UPDATE monthly_targets SET target_amount = $1 WHERE id = $2 RETURNING ${SELECT_FIELDS}`,
-    [targetAmount, id]
+    `UPDATE monthly_targets SET target_amount = $1 WHERE owner_id = $2 AND id = $3 RETURNING ${SELECT_FIELDS}`,
+    [targetAmount, ownerId, id]
   );
   return rows[0] || null;
 }
 
-export async function deleteTarget(id) {
-  const { rows } = await pool.query(`DELETE FROM monthly_targets WHERE id = $1 RETURNING ${SELECT_FIELDS}`, [id]);
+export async function deleteTarget(ownerId, id) {
+  const { rows } = await pool.query(
+    `DELETE FROM monthly_targets WHERE owner_id = $1 AND id = $2 RETURNING ${SELECT_FIELDS}`,
+    [ownerId, id]
+  );
   return rows[0] || null;
 }
 
@@ -135,11 +145,11 @@ export async function deleteTarget(id) {
 // `includeCompanies` also surfaces manufacturers that sold this month but
 // have no target yet, flagged `no-target`. Those rows are the whole reason
 // someone opens this page: they show where a target is missing.
-export async function getMonthProgress({ year, month, includeCompanies = true }) {
-  const targets = await listTargetsForMonth({ year, month });
+export async function getMonthProgress({ ownerId, year, month, includeCompanies = true }) {
+  const targets = await listTargetsForMonth({ ownerId, year, month });
 
   const overallTarget = targets.find((row) => row.company === null) ?? null;
-  const overallSales = await getAchievedSales({ year, month });
+  const overallSales = await getAchievedSales({ ownerId, year, month });
 
   const overall = {
     id: overallTarget?.id ?? null,
@@ -153,7 +163,7 @@ export async function getMonthProgress({ year, month, includeCompanies = true })
     return { year, month, overall, companies: [] };
   }
 
-  const salesByCompany = await getAchievedSalesByCompany({ year, month });
+  const salesByCompany = await getAchievedSalesByCompany({ ownerId, year, month });
   const salesByKey = new Map(salesByCompany.map((row) => [row.company.toLowerCase(), row]));
 
   const companies = targets
