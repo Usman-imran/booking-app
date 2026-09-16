@@ -6,9 +6,14 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "cap:sync": "npm run build && npx cap sync",
+    "cap:open": "npx cap open android",
+    "cap:run": "npm run cap:sync && npx cap run android",
+    "apk:debug": "npm run cap:sync && cd android && gradlew assembleDebug"
   },
   "dependencies": {
+    "@capacitor/core": "^8.5.2",
     "html2canvas": "^1.4.1",
     "jspdf": "^4.2.1",
     "react": "^18.3.1",
@@ -16,6 +21,8 @@
     "react-router-dom": "^6.26.2"
   },
   "devDependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/cli": "^8.5.2",
     "@vitejs/plugin-react": "^4.3.1",
     "vite": "^5.4.8"
   }

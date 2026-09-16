@@ -1,4 +1,30 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+import { Capacitor } from '@capacitor/core';
+
+// Where the backend lives. Set VITE_API_BASE_URL at build time (see
+// frontend/.env.example) — e.g. http://192.168.1.20:5000/api for a phone on
+// the same Wi-Fi, or https://api.example.com/api once the backend is hosted.
+//
+// There is deliberately no localhost fallback on a device: inside the Android
+// WebView "localhost" is the phone itself, not the machine running the
+// backend, so an unconfigured mobile build would silently fail against a
+// server that isn't there. Browser builds keep the localhost default so
+// `npm run dev` works with no .env at all.
+const CONFIGURED_BASE_URL = import.meta.env.VITE_API_BASE_URL?.trim();
+const BROWSER_FALLBACK_BASE_URL = 'http://localhost:5000/api';
+
+function getApiBaseUrl() {
+  if (CONFIGURED_BASE_URL) {
+    return CONFIGURED_BASE_URL.replace(/\/+$/, '');
+  }
+
+  if (Capacitor.isNativePlatform()) {
+    throw new Error(
+      'No API server configured for this build. Rebuild with VITE_API_BASE_URL set to the backend address reachable from this device, e.g. http://192.168.1.20:5000/api'
+    );
+  }
+
+  return BROWSER_FALLBACK_BASE_URL;
+}
 
 let authToken = null;
 
@@ -9,7 +35,7 @@ export function setAuthToken(token) {
 }
 
 async function request(path, { method = 'GET', body, headers, ...rest } = {}) {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(`${getApiBaseUrl()}${path}`, {
     method,
     headers: {
       ...(body ? { 'Content-Type': 'application/json' } : {}),
@@ -37,7 +63,7 @@ async function request(path, { method = 'GET', body, headers, ...rest } = {}) {
 // sets its own with the multipart boundary, and overriding it makes the
 // request unparseable on the server.
 async function postForm(path, formData) {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(`${getApiBaseUrl()}${path}`, {
     method: 'POST',
     headers: {
       ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
@@ -66,7 +92,7 @@ async function postForm(path, formData) {
 // <a href> can't be used: these routes require the bearer token, which a
 // browser navigation would not send.
 async function getBlob(path) {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(`${getApiBaseUrl()}${path}`, {
     headers: {
       ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
     },
