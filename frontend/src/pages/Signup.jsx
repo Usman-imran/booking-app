@@ -75,6 +75,9 @@ export default function Signup() {
       adoptSession(data.token, data.user);
       navigate('/', { replace: true });
     } catch (err) {
+      // The message is shown to the user; the full error (with its cause,
+      // for a network failure) goes to the console for diagnosis.
+      console.error('Sign-up failed:', err);
       setError(err.message);
     } finally {
       setIsSubmitting(false);

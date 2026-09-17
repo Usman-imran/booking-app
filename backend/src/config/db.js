@@ -17,4 +17,13 @@ const pool = new Pool(
       }
 );
 
+// An idle pooled connection can be dropped by the server (Postgres
+// restart, network blip). Without a listener that surfaces as an unhandled
+// 'error' event, which crashes the whole process — and every request from
+// then on fails in the browser as "Failed to fetch". Log it instead; the
+// pool replaces the connection on the next query.
+pool.on('error', (err) => {
+  console.error('Unexpected error on idle database connection:', err.message);
+});
+
 export default pool;

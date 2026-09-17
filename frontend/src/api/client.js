@@ -2,6 +2,32 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000
 
 let authToken = null;
 
+// fetch() rejects with a bare TypeError ("Failed to fetch") whenever the
+// browser got NO response: backend not running, wrong port, CORS blocked,
+// or the network dropped. The message says nothing about which. This
+// replaces it with one that names the URL and the likely causes, and logs
+// the original error so the console still has the full detail.
+class NetworkError extends Error {
+  constructor(url, cause) {
+    super(
+      `Could not reach the server at ${url}. ` +
+        'Check that the backend is running, that VITE_API_BASE_URL points at it, ' +
+        "and that its CORS_ORIGIN allows this page's origin."
+    );
+    this.name = 'NetworkError';
+    this.cause = cause;
+  }
+}
+
+async function doFetch(url, options) {
+  try {
+    return await fetch(url, options);
+  } catch (err) {
+    console.error(`[api] ${options?.method || 'GET'} ${url} failed before a response arrived:`, err);
+    throw new NetworkError(url, err);
+  }
+}
+
 // Called by AuthContext on login/logout/hydration so every request can
 // carry the current token without callers passing it explicitly.
 export function setAuthToken(token) {
@@ -9,7 +35,7 @@ export function setAuthToken(token) {
 }
 
 async function request(path, { method = 'GET', body, headers, ...rest } = {}) {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await doFetch(`${API_BASE_URL}${path}`, {
     method,
     headers: {
       ...(body ? { 'Content-Type': 'application/json' } : {}),
@@ -37,7 +63,7 @@ async function request(path, { method = 'GET', body, headers, ...rest } = {}) {
 // sets its own with the multipart boundary, and overriding it makes the
 // request unparseable on the server.
 async function postForm(path, formData) {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await doFetch(`${API_BASE_URL}${path}`, {
     method: 'POST',
     headers: {
       ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
@@ -66,7 +92,7 @@ async function postForm(path, formData) {
 // <a href> can't be used: these routes require the bearer token, which a
 // browser navigation would not send.
 async function getBlob(path) {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await doFetch(`${API_BASE_URL}${path}`, {
     headers: {
       ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
     },

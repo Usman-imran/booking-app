@@ -30,6 +30,7 @@ export default function Login() {
       await login(username, password);
       navigate(from, { replace: true });
     } catch (err) {
+      console.error('Sign-in failed:', err);
       setError(err.message);
     } finally {
       setIsSubmitting(false);
