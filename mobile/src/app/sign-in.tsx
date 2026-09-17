@@ -27,7 +27,7 @@ export default function SignIn() {
     setIsSubmitting(true);
     try {
       await login(username.trim(), password);
-      router.replace('/home');
+      router.replace('/(tabs)');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong.');
     } finally {

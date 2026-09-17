@@ -12,6 +12,9 @@ type AuthContextValue = {
   // Adopts a session the caller already obtained - used by sign-up, where
   // /auth/register hands back a token for the account it just created.
   adoptSession: (token: string, user: PublicUser) => Promise<void>;
+  // Re-reads the session's user from the API - after a rename in Settings,
+  // so every screen showing the company name picks it up at once.
+  refreshUser: () => Promise<PublicUser>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -66,6 +69,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(nextUser);
   }, []);
 
+  const refreshUser = useCallback(async () => {
+    const data = await fetchMe();
+    setUser(data.user);
+    return data.user;
+  }, []);
+
   const logout = useCallback(async () => {
     await clearStoredToken();
     setAuthToken(null);
@@ -73,7 +82,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, logout, adoptSession }}>
+    <AuthContext.Provider value={{ user, isLoading, login, logout, adoptSession, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

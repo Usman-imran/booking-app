@@ -68,7 +68,7 @@ export default function SignUp() {
       });
 
       await adoptSession(data.token, data.user);
-      router.replace('/home');
+      router.replace('/(tabs)');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong.');
     } finally {

@@ -30,3 +30,9 @@ export function register(input: {
 export function me(): Promise<{ user: PublicUser }> {
   return apiClient.get('/auth/me');
 }
+
+// Renames the business for the signed-in account only. Returns the
+// refreshed user.
+export function updateCompanyName(companyName: string): Promise<{ user: PublicUser }> {
+  return apiClient.put('/auth/company', { companyName });
+}
