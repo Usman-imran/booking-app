@@ -1,11 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { ErrorState } from '@/components/ErrorState';
 import { Banner } from '@/components/form/Banner';
 import { Button } from '@/components/form/Button';
+import { OrderReceiptModal } from '@/components/orders/OrderReceiptModal';
 import { StatusBadge } from '@/components/StatusBadge';
 import { cancelOrder, deleteDraftOrder, getOrder, submitDraftOrder, type OrderDetail } from '@/lib/api/orders';
 import { cardShadow, colors, formatDateTime, formatMoney, radius, spacing } from '@/lib/theme';
@@ -21,9 +22,13 @@ function Row({ label, value, strong }: { label: string; value: string; strong?: 
 
 // One order in full - lines, totals, customer - with the actions its status
 // allows: a draft can be continued, submitted or deleted; a submitted order
-// can only be cancelled; a cancelled one is read-only. Mirrors the web's
-// OrderDetails page.
-export function OrderDetailsScreen({ id }: { id: string }) {
+// can be shared as an invoice or cancelled; a cancelled one is read-only.
+// Mirrors the web's OrderDetails page.
+//
+// `shareOnOpen` opens the invoice as soon as the order loads - the landing
+// for a draft submitted from the Create Order screen, so it ends the same
+// way as a new order: with the receipt ready to send.
+export function OrderDetailsScreen({ id, shareOnOpen = false }: { id: string; shareOnOpen?: boolean }) {
   const [order, setOrder] = useState<OrderDetail | null>(null);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState<string | null>(null);
@@ -31,6 +36,7 @@ export function OrderDetailsScreen({ id }: { id: string }) {
   const [action, setAction] = useState<null | 'submit' | 'cancel' | 'delete'>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [isReceiptOpen, setIsReceiptOpen] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -48,6 +54,15 @@ export function OrderDetailsScreen({ id }: { id: string }) {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, [load]);
+
+  // Only once, on the first successful load: reopening the sheet every
+  // pull-to-refresh would be maddening.
+  const autoShared = useRef(false);
+  useEffect(() => {
+    if (!shareOnOpen || autoShared.current || order?.status !== 'submitted') return;
+    autoShared.current = true;
+    setIsReceiptOpen(true);
+  }, [shareOnOpen, order]);
 
   async function refresh() {
     setIsRefreshing(true);
@@ -239,6 +254,12 @@ export function OrderDetailsScreen({ id }: { id: string }) {
       ) : order.status === 'submitted' ? (
         <View style={styles.actions}>
           <Button
+            title="Share / Export Invoice"
+            icon="share-social-outline"
+            onPress={() => setIsReceiptOpen(true)}
+            disabled={isBusy}
+          />
+          <Button
             title="Cancel Order"
             icon="close-circle-outline"
             variant="danger"
@@ -251,6 +272,8 @@ export function OrderDetailsScreen({ id }: { id: string }) {
       ) : (
         <Text style={styles.note}>This order was cancelled and is kept for the record only.</Text>
       )}
+
+      <OrderReceiptModal visible={isReceiptOpen} order={order} onClose={() => setIsReceiptOpen(false)} />
     </ScrollView>
   );
 }

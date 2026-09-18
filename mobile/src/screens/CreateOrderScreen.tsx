@@ -8,6 +8,7 @@ import { Banner } from '@/components/form/Banner';
 import { Button } from '@/components/form/Button';
 import { FormScreen } from '@/components/form/FormScreen';
 import { CustomerPickerModal } from '@/components/orders/CustomerPickerModal';
+import { OrderReceiptModal } from '@/components/orders/OrderReceiptModal';
 import { ProductPickerModal } from '@/components/orders/ProductPickerModal';
 import { PressableScale } from '@/components/PressableScale';
 import type { Customer } from '@/lib/api/customers';
@@ -58,9 +59,13 @@ type Line = { product: Product; quantity: string; discount: string };
 type SelectedCustomer = Pick<Customer | OrderCustomer, 'id' | 'name' | 'code' | 'phone' | 'cityArea' | 'address'>;
 
 // The core screen of the whole application: pick a customer, search
-// products, enter quantities, submit. The mobile counterpart of the web's
+// products, enter quantities, share. The mobile counterpart of the web's
 // CreateOrder page - same validation, same payload, same two routes: a new
 // order, or continuing a saved draft when `draftId` is given.
+//
+// "Share Order" is the submit action: it books the order (assigning its
+// number) and then opens the invoice to share as a JPG or PDF. A booker's
+// last step is handing the customer their receipt, so the two are one tap.
 //
 // Every figure shown is a live preview from orderCalc. The server
 // recalculates all of it on save and returns the authoritative result.
@@ -75,6 +80,9 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
   const [error, setError] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [success, setSuccess] = useState<OrderDetail | null>(null);
+  // The order whose receipt is open for sharing - set as soon as a new
+  // order is submitted, and again from the success banner's Share button.
+  const [shareOrder, setShareOrder] = useState<OrderDetail | null>(null);
 
   const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
   const [productPickerOpen, setProductPickerOpen] = useState(false);
@@ -268,6 +276,9 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
         const data = await createOrder({ ...payload, status });
         setSuccess(data.order);
         resetForm();
+        // A submitted order goes straight to the share sheet; a draft has
+        // no order number yet, so there is nothing to share.
+        if (status === 'submitted') setShareOrder(data.order);
         return;
       }
 
@@ -282,7 +293,9 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
       }
 
       await submitDraftOrder(draftId!);
-      router.replace(`/orders/${draftId}`);
+      // The details screen opens the share sheet on arrival, so submitting
+      // a draft ends the same way as submitting a new order.
+      router.replace({ pathname: '/orders/[id]', params: { id: draftId!, share: '1' } });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong.');
     } finally {
@@ -331,6 +344,16 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
           {formatMoney(success.total)}.
           {success.status === 'draft' ? ' It has no order number yet - one is assigned when the draft is submitted.' : ''}
         </Banner>
+      ) : null}
+
+      {success && success.status === 'submitted' ? (
+        <Button
+          title="Share Invoice Again"
+          icon="share-social-outline"
+          variant="secondary"
+          onPress={() => setShareOrder(success)}
+          style={styles.shareAgain}
+        />
       ) : null}
 
       {unavailableProducts.length > 0 ? (
@@ -510,7 +533,8 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
           style={styles.flex1}
         />
         <Button
-          title="Submit Order"
+          title="Share Order"
+          icon="share-social-outline"
           onPress={() => save('submitted')}
           loading={saving === 'submitted'}
           disabled={isBusy}
@@ -523,8 +547,9 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
       ) : null}
 
       <Text style={styles.note}>
-        Bonus quantity is free - added on top of the paid quantity, never taken out of it. Submitting is final: a
-        submitted order cannot be edited, only cancelled.
+        Share Order submits the order, assigns its order number and opens the invoice to share as a JPG or PDF - on
+        WhatsApp or any other app. Submitting is final: a submitted order cannot be edited, only cancelled. Bonus
+        quantity is free - added on top of the paid quantity, never taken out of it.
       </Text>
 
       <CustomerPickerModal
@@ -543,6 +568,7 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
         cartQuantities={cartQuantities}
         limitReached={lines.length >= MAX_ITEMS}
       />
+      <OrderReceiptModal visible={shareOrder !== null} order={shareOrder} onClose={() => setShareOrder(null)} />
     </FormScreen>
   );
 }
@@ -713,5 +739,6 @@ const styles = StyleSheet.create({
 
   actions: { flexDirection: 'row', gap: spacing.md },
   clear: { marginTop: spacing.md },
+  shareAgain: { marginBottom: spacing.lg },
   note: { fontSize: 12, color: colors.textMuted, lineHeight: 18, marginTop: spacing.lg },
 });

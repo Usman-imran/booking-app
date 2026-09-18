@@ -45,7 +45,10 @@ export type OrderItem = {
   lineTotal: number;
 };
 
-export type OrderDetail = OrderSummary & { items: OrderItem[] };
+// The booker is only joined onto the detail payload, not list rows.
+export type OrderBooker = { id: number; name: string; username: string };
+
+export type OrderDetail = OrderSummary & { items: OrderItem[]; booker?: OrderBooker };
 
 export type Pagination = { page: number; limit: number; total: number; totalPages: number };
 

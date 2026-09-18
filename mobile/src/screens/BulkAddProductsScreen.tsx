@@ -24,12 +24,15 @@ import { cardShadow, colors, radius, spacing } from '@/lib/theme';
 const ACCEPTED_EXTENSIONS = ['.xlsx', '.xls', '.csv'];
 const MAX_BYTES = 5 * 1024 * 1024;
 
-// Handed to the OS picker so only spreadsheets are offered. The name check
-// below is what actually decides, matching the server's own rule: MIME
-// types for .xlsx vary wildly between platforms.
+// Handed to the OS picker so only spreadsheets are offered. Every name a
+// platform is known to give a CSV is listed, because Android file managers
+// hide a file whose MIME type isn't in the list. The name check below is
+// what actually decides, matching the server's own rule: MIME types for
+// .xlsx vary wildly between platforms.
 const PICKER_MIME_TYPES = [
   'text/csv',
   'text/comma-separated-values',
+  'application/csv',
   'application/vnd.ms-excel',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 ];
@@ -44,7 +47,7 @@ const OPTIONAL_COLUMNS: [string, string][] = [
   ['Company, Packing, Unit', 'new: empty · existing: unchanged'],
 ];
 
-type PickedFile = UploadFile & { size: number };
+type PickedFile = UploadFile & { name: string; type: string; size: number };
 
 function isAcceptedName(name: string) {
   const lower = name.toLowerCase();

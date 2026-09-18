@@ -203,6 +203,14 @@ export default function OrderReceiptModal({ open, order: providedOrder, orderId,
                 </div>
 
                 <table className="receipt-table">
+                  <colgroup>
+                    <col className="col-product" />
+                    <col className="col-rate" />
+                    <col className="col-paid" />
+                    <col className="col-bonus" />
+                    <col className="col-discount" />
+                    <col className="col-total" />
+                  </colgroup>
                   <thead>
                     <tr>
                       <th>Product</th>
@@ -223,7 +231,9 @@ export default function OrderReceiptModal({ open, order: providedOrder, orderId,
                         <td className="receipt-num">{formatMoney(line.rate)}</td>
                         <td className="receipt-num">{line.paidQty}</td>
                         <td className="receipt-num">
-                          {line.bonusQty > 0 ? <span className="receipt-bonus">+{line.bonusQty}</span> : '—'}
+                          <div className="receipt-bonus-cell">
+                            {line.bonusQty > 0 ? <span className="receipt-bonus">+{line.bonusQty}</span> : '—'}
+                          </div>
                         </td>
                         <td className="receipt-num">{line.discount > 0 ? `${formatMoney(line.discount)}%` : '—'}</td>
                         <td className="receipt-num receipt-line-total">{formatMoney(line.lineTotal)}</td>

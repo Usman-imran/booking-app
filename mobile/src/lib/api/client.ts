@@ -1,3 +1,5 @@
+import { Platform } from 'react-native';
+
 import { API_BASE_URL } from './config';
 
 let authToken: string | null = null;
@@ -69,13 +71,19 @@ async function request(path: string, { method = 'GET', body, headers }: RequestO
 }
 
 // Uploads a multipart form (a spreadsheet, currently). The body must NOT be
-// JSON-stringified and must NOT carry a Content-Type header - React Native
-// sets its own with the multipart boundary, and overriding it makes the
-// request unparseable on the server.
+// JSON-stringified.
+//
+// On iOS and Android the request is declared multipart/form-data up front;
+// the native networking layer still generates the boundary and appends it
+// to this header, so the server gets a well-formed multipart request. In a
+// browser (Expo web) the header must be left alone: fetch() derives it from
+// the FormData, and a hand-set value without a boundary makes the request
+// unparseable on the server.
 async function postForm(path: string, formData: FormData) {
   const response = await doFetch(`${API_BASE_URL}${path}`, {
     method: 'POST',
     headers: {
+      ...(Platform.OS !== 'web' ? { 'Content-Type': 'multipart/form-data' } : {}),
       ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
     },
     body: formData,

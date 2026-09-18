@@ -2098,9 +2098,42 @@ a {
   color: #6b7280;
 }
 
+/* Fixed layout with explicit column widths, so the columns sit in the
+   same place on screen and in every export. */
 .receipt-table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.receipt-table col.col-product {
+  width: 35%;
+}
+
+.receipt-table col.col-rate {
+  width: 12%;
+}
+
+.receipt-table col.col-paid {
+  width: 12%;
+}
+
+.receipt-table col.col-bonus {
+  width: 10%;
+}
+
+.receipt-table col.col-discount {
+  width: 11%;
+}
+
+.receipt-table col.col-total {
+  width: 20%;
+}
+
+.receipt-table th,
+.receipt-table td {
+  padding: 10px 12px;
+  text-align: left;
 }
 
 .receipt-table thead th {
@@ -2109,39 +2142,40 @@ a {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.03em;
-  text-align: left;
-  padding: 9px 10px;
 }
 
-.receipt-table thead th:first-child {
-  padding-left: 28px;
-}
-
-.receipt-table thead th:last-child {
-  padding-right: 28px;
-}
-
-.receipt-table td {
-  padding: 9px 10px;
-  border-bottom: 1px solid #e5e7eb;
-  vertical-align: top;
-}
-
+.receipt-table th:first-child,
 .receipt-table td:first-child {
   padding-left: 28px;
 }
 
+.receipt-table th:last-child,
 .receipt-table td:last-child {
   padding-right: 28px;
+}
+
+.receipt-table td {
+  border-bottom: 1px solid #e5e7eb;
+  vertical-align: top;
+  overflow-wrap: anywhere;
 }
 
 .receipt-table tbody tr:nth-child(even) td {
   background: #f8fafc;
 }
 
-.receipt-num {
+/* Numeric headers and cells share one rule at one specificity, so the
+   figures line up under their headings. */
+.receipt-table th.receipt-num,
+.receipt-table td.receipt-num {
   text-align: right;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.receipt-bonus-cell {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .receipt-product {
