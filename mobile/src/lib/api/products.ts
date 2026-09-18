@@ -1,3 +1,4 @@
+import { File as FsFile } from 'expo-file-system';
 import { Platform } from 'react-native';
 
 import apiClient from './client';
@@ -116,7 +117,8 @@ export type ImportResult = { message: string; summary: ImportSummary };
 
 // A file picked with expo-document-picker. `type` is the picker's MIME
 // type, which is often missing or a generic octet-stream for spreadsheets.
-export type UploadFile = { uri: string; name?: string | null; type?: string | null };
+// `file` is the browser File the picker hands over on web only.
+export type UploadFile = { uri: string; name?: string | null; type?: string | null; file?: Blob | null };
 
 // What the server accepts, keyed by extension. The server itself only
 // checks the extension (MIME types for .xlsx vary wildly between platforms),
@@ -135,40 +137,45 @@ function mimeTypeFor(name: string, picked?: string | null) {
   return extension ? MIME_BY_EXTENSION[extension] : 'text/csv';
 }
 
-// The multipart part React Native's networking layer expects for a file:
-// a plain {uri, name, type} object, not a Blob.
+// Builds the multipart form for a spreadsheet upload.
 //
-// The URI is handed over as the picker returned it on Android (file:// or
-// content://, both of which Android's networking resolves), while iOS gets
-// a bare filesystem path - the form the iOS layer has always accepted for
-// a local file. The name always carries a spreadsheet extension because
-// that is the one thing the server's upload filter checks.
-export function toUploadPart(file: UploadFile) {
+// Expo's fetch (the global fetch since SDK 55) encodes the multipart body
+// itself and does not understand React Native's classic {uri, name, type}
+// file part - appending one fails with "Unsupported FormDataPart
+// implementation". What it does accept is a Blob, or any object with a
+// bytes() method, which it reads alongside `name` and `type` for the part
+// headers. So the picked file is read through expo-file-system and offered
+// that way; on web the picker already hands over a browser File. The name
+// always carries a spreadsheet extension because that is the one thing the
+// server's upload filter checks.
+async function fileForm(file: UploadFile) {
   const name = file.name?.trim() || DEFAULT_UPLOAD_NAME;
-  return {
-    uri: Platform.OS === 'android' ? file.uri : file.uri.replace('file://', ''),
-    name,
-    type: mimeTypeFor(name, file.type),
-  };
-}
-
-function fileForm(file: UploadFile) {
+  const type = mimeTypeFor(name, file.type);
   const form = new FormData();
-  // The RN FormData typing only knows Blob | string; the {uri,name,type}
-  // object is what the native layer actually expects for a file.
-  form.append('file', toUploadPart(file) as unknown as Blob);
+
+  if (Platform.OS === 'web') {
+    const blob = file.file ?? (await (await fetch(file.uri)).blob());
+    form.append('file', blob, name);
+    return form;
+  }
+
+  const source = new FsFile(file.uri);
+  const part = { name, type, bytes: () => source.bytes() };
+  // The FormData typing only knows Blob | string; Expo's encoder duck-types
+  // the object at send time.
+  form.append('file', part as unknown as Blob);
   return form;
 }
 
 // Checks a .xlsx/.csv file without saving anything - the first half of the
 // two-step import.
-export function validateProductImport(file: UploadFile): Promise<ImportValidation> {
-  return apiClient.postForm('/products/validate-bulk', fileForm(file));
+export async function validateProductImport(file: UploadFile): Promise<ImportValidation> {
+  return apiClient.postForm('/products/validate-bulk', await fileForm(file));
 }
 
 // Imports a validated file. All-or-nothing: if anything is wrong nothing is
 // written and the rejection (422) carries the same row-level errors in its
 // body.
-export function bulkUploadProducts(file: UploadFile): Promise<ImportResult> {
-  return apiClient.postForm('/products/bulk-upload', fileForm(file));
+export async function bulkUploadProducts(file: UploadFile): Promise<ImportResult> {
+  return apiClient.postForm('/products/bulk-upload', await fileForm(file));
 }

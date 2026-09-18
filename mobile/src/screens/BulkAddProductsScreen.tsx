@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Banner } from '@/components/form/Banner';
 import { Button } from '@/components/form/Button';
@@ -159,7 +159,12 @@ export function BulkAddProductsScreen() {
       const result = await DocumentPicker.getDocumentAsync({
         type: PICKER_MIME_TYPES,
         multiple: false,
-        copyToCacheDirectory: true,
+        // On Android the file is uploaded straight from the content:// URI
+        // the picker grants, which expo-file-system may always read. A
+        // cached copy would land in the raw app cache, which Expo Go's
+        // scoped file permissions refuse to read back. iOS copies into the
+        // app's own caches directory, which is fine.
+        copyToCacheDirectory: Platform.OS !== 'android',
       });
       if (result.canceled || !result.assets[0]) return;
 
@@ -179,6 +184,7 @@ export function BulkAddProductsScreen() {
         uri: asset.uri,
         name: asset.name,
         type: asset.mimeType || 'application/octet-stream',
+        file: asset.file ?? null,
         size,
       });
     } catch (err) {
