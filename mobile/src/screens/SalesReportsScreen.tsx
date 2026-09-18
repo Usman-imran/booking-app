@@ -14,14 +14,16 @@ const MONTH_NAMES = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
-// The five reports the web offers, as chips. Each declares how one of its
-// rows reads; the date range, summary strip, paging and states are shared.
+// The breakdowns, as chips. Each declares how one of its rows reads; the
+// date range, summary strip, paging and states are shared. The web's
+// "Date Range" tab has no counterpart here: it only showed the period's
+// totals, which the summary strip already shows above every tab.
 const TABS: { id: ReportType; label: string; empty: string }[] = [
   { id: 'daily', label: 'Daily', empty: 'No sales in this period.' },
   { id: 'monthly', label: 'Monthly', empty: 'No sales in this period.' },
   { id: 'customer', label: 'Customer-wise', empty: 'No customer had sales in this period.' },
   { id: 'product', label: 'Product-wise', empty: 'No product sold in this period.' },
-  { id: 'range', label: 'Date Range', empty: 'No sales in this period.' },
+  { id: 'company', label: 'Company-wise', empty: 'No company had sales in this period.' },
 ];
 
 function todayIso() {
@@ -42,7 +44,7 @@ function formatDay(iso: string) {
 }
 
 function rowKey(row: ReportRow, index: number) {
-  return row.customerId ?? row.productId ?? row.period ?? String(index);
+  return row.customerId ?? row.productId ?? row.period ?? row.company ?? String(index);
 }
 
 function ReportRowCard({ type, row }: { type: ReportType; row: ReportRow }) {
@@ -56,6 +58,9 @@ function ReportRowCard({ type, row }: { type: ReportType; row: ReportRow }) {
   } else if (type === 'product') {
     title = row.productName ?? '-';
     subtitle = row.productCode ?? null;
+  } else if (type === 'company') {
+    title = row.company ?? 'No company recorded';
+    subtitle = `${row.products ?? 0} product${row.products === 1 ? '' : 's'} · ${row.orders} order${row.orders === 1 ? '' : 's'}`;
   }
 
   return (
@@ -66,7 +71,7 @@ function ReportRowCard({ type, row }: { type: ReportType; row: ReportRow }) {
         </Text>
         {subtitle ? <Text style={styles.rowMeta}>{subtitle}</Text> : null}
         <Text style={styles.rowMeta}>
-          {type === 'product'
+          {type === 'product' || type === 'company'
             ? `${row.paidQty ?? 0} paid qty${row.bonusQty ? ` · +${row.bonusQty} bonus free` : ''}`
             : `${row.orders} valid order${row.orders === 1 ? '' : 's'}`}
         </Text>
@@ -225,30 +230,14 @@ export function SalesReportsScreen() {
     <FlatList
       style={styles.flex}
       contentContainerStyle={styles.listContent}
-      data={status === 'ready' && type !== 'range' ? rows : []}
+      data={status === 'ready' ? rows : []}
       keyExtractor={rowKey}
       ListHeaderComponent={header}
       renderItem={({ item }) => <ReportRowCard type={type} row={item} />}
       refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => load('refresh')} tintColor={colors.primary} />}
       onEndReached={loadMore}
       onEndReachedThreshold={0.4}
-      ListEmptyComponent={
-        status === 'ready' ? (
-          type === 'range' ? (
-            <EmptyState
-              icon="calculator-outline"
-              title={summary?.orders === 0 ? 'No sales in this period' : 'The totals above are the report'}
-              message={
-                summary?.orders === 0
-                  ? undefined
-                  : 'Pick another tab to break them down by day, month, customer or product.'
-              }
-            />
-          ) : (
-            <EmptyState icon="bar-chart-outline" title={tab.empty} />
-          )
-        ) : null
-      }
+      ListEmptyComponent={status === 'ready' ? <EmptyState icon="bar-chart-outline" title={tab.empty} /> : null}
       ListFooterComponent={isLoadingMore ? <ActivityIndicator style={styles.footer} color={colors.primary} /> : null}
     />
   );

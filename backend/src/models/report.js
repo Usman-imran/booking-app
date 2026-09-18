@@ -344,3 +344,51 @@ export async function getProductSales({ ownerId, dateFrom, dateTo, page, limit }
     total,
   };
 }
+
+// Company-wise Sales: manufacturer, distinct products sold, paid and bonus
+// quantities, orders, sales.
+//
+// The product-wise report rolled up one level: the same lines, the same
+// money, grouped by each product's CURRENT manufacturer — the reading
+// getAchievedSales() already uses for company targets, so a company's
+// figure here and its target progress can never disagree. Products with no
+// manufacturer recorded form one row of their own (company null) rather
+// than vanishing from the total.
+//
+// Manufacturer names are typed by hand, so they are grouped
+// case-insensitively and blanks are treated as missing; the row is
+// labelled with the most common spelling.
+export async function getCompanySales({ ownerId, dateFrom, dateTo, page, limit }) {
+  const { where, params } = buildFilter({ ownerId, dateFrom, dateTo });
+
+  const companyKey = "lower(NULLIF(btrim(p.company), ''))";
+
+  const { rows, total } = await runGrouped({
+    select: `${companyKey} AS company_key,
+             mode() WITHIN GROUP (ORDER BY NULLIF(btrim(p.company), '')) AS company,
+             COUNT(DISTINCT p.id)::int AS products,
+             COALESCE(SUM(oi.paid_qty), 0)::int AS paid_qty,
+             COALESCE(SUM(oi.bonus_qty), 0)::int AS bonus_qty,
+             COUNT(DISTINCT o.id)::int AS orders,
+             COALESCE(SUM(oi.line_total), 0) AS sales`,
+    from: 'order_items oi JOIN orders o ON o.id = oi.order_id JOIN products p ON p.id = oi.product_id',
+    groupBy: companyKey,
+    orderBy: `COALESCE(SUM(oi.line_total), 0) DESC, ${companyKey} ASC NULLS LAST`,
+    where,
+    params,
+    page,
+    limit,
+  });
+
+  return {
+    rows: rows.map((row) => ({
+      company: row.company ?? null,
+      products: row.products,
+      paidQty: row.paid_qty,
+      bonusQty: row.bonus_qty,
+      orders: row.orders,
+      sales: toMoney(row.sales),
+    })),
+    total,
+  };
+}

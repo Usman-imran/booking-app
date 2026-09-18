@@ -4,7 +4,7 @@ import { formatMoney } from '../orders/orderCalc.js';
 
 const PAGE_SIZE = 50;
 
-// The six reports PROJECT_SPEC.md §18 requires, as tabs. Each one declares
+// The reports PROJECT_SPEC.md §18 requires plus company-wise, as tabs. Each one declares
 // its own columns; everything else on this page — the date range, the
 // summary strip, paging, the loading/empty/error states — is shared, so a
 // tab is just a table definition.
@@ -71,6 +71,34 @@ const TABS = [
         // Shown as a quantity and never as money: bonus units are free
         // (PROJECT_SPEC.md §9), so they contribute nothing to the Sales
         // column beside them.
+        render: (row) => (row.bonusQty > 0 ? <span className="bonus-badge">+{row.bonusQty}</span> : '—'),
+      },
+      { key: 'sales', header: 'Sales', numeric: true, money: true },
+    ],
+  },
+  {
+    id: 'company',
+    label: 'Company-wise',
+    empty: 'No company had sales in this period.',
+    columns: [
+      {
+        key: 'company',
+        header: 'Company',
+        render: (row) => (
+          <>
+            <div>{row.company ?? 'No company recorded'}</div>
+            <div className="muted">
+              {row.products} product{row.products === 1 ? '' : 's'}
+            </div>
+          </>
+        ),
+      },
+      { key: 'orders', header: 'Orders', numeric: true },
+      { key: 'paidQty', header: 'Paid Qty Sold', numeric: true },
+      {
+        key: 'bonusQty',
+        header: 'Bonus Qty',
+        numeric: true,
         render: (row) => (row.bonusQty > 0 ? <span className="bonus-badge">+{row.bonusQty}</span> : '—'),
       },
       { key: 'sales', header: 'Sales', numeric: true, money: true },
@@ -323,7 +351,7 @@ export default function SalesReports() {
                   </thead>
                   <tbody>
                     {report.rows.map((row, index) => (
-                      <tr key={row.customerId ?? row.productId ?? row.period ?? index}>
+                      <tr key={row.customerId ?? row.productId ?? row.period ?? row.company ?? index}>
                         {tab.columns.map((column) => (
                           <td
                             key={column.key}

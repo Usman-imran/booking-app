@@ -1,7 +1,7 @@
 import apiClient from './client';
 import type { Pagination } from './orders';
 
-export type ReportType = 'daily' | 'monthly' | 'customer' | 'product' | 'range';
+export type ReportType = 'daily' | 'monthly' | 'customer' | 'product' | 'company' | 'range';
 
 export type ReportSummary = {
   orders: number;
@@ -24,6 +24,9 @@ export type ReportRow = {
   productId?: string;
   productName?: string;
   productCode?: string;
+  // Company-wise: null when the products had no manufacturer recorded.
+  company?: string | null;
+  products?: number;
   paidQty?: number;
   bonusQty?: number;
   orders: number;

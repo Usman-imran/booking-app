@@ -21,21 +21,79 @@ import { formatScheme } from '@/lib/orderCalc';
 import { colors, formatMoney, radius, spacing } from '@/lib/theme';
 
 const RESULT_LIMIT = 25;
+const MAX_QUANTITY = 1000000;
 
 type Props = {
   visible: boolean;
   onClose: () => void;
   onAdd: (product: Product) => void;
+  // Sets a product's quantity on the order outright: 0 removes the line,
+  // anything else creates or updates it.
+  onSetQuantity: (product: Product, quantity: number) => void;
   // Product id -> quantity already on the order, so a row can say so.
   cartQuantities: Map<string, number>;
   limitReached: boolean;
 };
 
+// The quantity control for a product that is already on the order: minus,
+// a typeable figure, plus. Typing lands on the order as soon as the figure
+// is a whole number, so the booker can key "24" and move on; a box left
+// blank or invalid snaps back to the real quantity when it loses focus.
+function QuantityStepper({
+  quantity,
+  onChange,
+}: {
+  quantity: number;
+  onChange: (quantity: number) => void;
+}) {
+  // While the box is being typed in it shows the keystrokes (so it can be
+  // blank mid-edit); otherwise it shows the order's own figure, so a +/-
+  // tap or a change made on the order screen is reflected here too.
+  const [draft, setDraft] = useState<string | null>(null);
+  const text = draft ?? String(quantity);
+
+  function commit(value: string) {
+    setDraft(value);
+    const parsed = Number(value);
+    if (value.trim() !== '' && Number.isInteger(parsed) && parsed >= 0) {
+      onChange(Math.min(parsed, MAX_QUANTITY));
+    }
+  }
+
+  return (
+    <View style={styles.stepper}>
+      <Pressable
+        style={({ pressed }) => [styles.stepButton, pressed && styles.stepButtonPressed]}
+        onPress={() => onChange(quantity - 1)}
+        hitSlop={4}>
+        <Ionicons name={quantity <= 1 ? 'trash-outline' : 'remove'} size={18} color={quantity <= 1 ? colors.danger : colors.text} />
+      </Pressable>
+      <TextInput
+        style={styles.qtyInput}
+        value={text}
+        keyboardType="number-pad"
+        selectTextOnFocus
+        onFocus={() => setDraft(String(quantity))}
+        onChangeText={commit}
+        onBlur={() => setDraft(null)}
+      />
+      <Pressable
+        style={({ pressed }) => [styles.stepButton, pressed && styles.stepButtonPressed]}
+        onPress={() => onChange(Math.min(quantity + 1, MAX_QUANTITY))}
+        hitSlop={4}>
+        <Ionicons name="add" size={18} color={colors.text} />
+      </Pressable>
+    </View>
+  );
+}
+
 // The mobile product browser: search, optional company filter, tap "Add".
 // The sheet stays open after adding so several products (or several
-// strengths of the same medicine) can be added in one go; the row shows the
-// quantity already on the order so the booker can see what they've done.
-export function ProductPickerModal({ visible, onClose, onAdd, cartQuantities, limitReached }: Props) {
+// strengths of the same medicine) can be added in one go. Once a product
+// is on the order its row turns into a quantity stepper, so a quantity of
+// 24 is typed here rather than tapped 24 times or hunted for on the order
+// screen afterwards.
+export function ProductPickerModal({ visible, onClose, onAdd, onSetQuantity, cartQuantities, limitReached }: Props) {
   const [input, setInput] = useState('');
   const [search, setSearch] = useState('');
   const [company, setCompany] = useState('');
@@ -171,7 +229,7 @@ export function ProductPickerModal({ visible, onClose, onAdd, cartQuantities, li
             renderItem={({ item }) => {
               const inCart = cartQuantities.get(item.id) ?? 0;
               return (
-                <View style={styles.row}>
+                <View style={[styles.row, inCart > 0 && styles.rowInCart]}>
                   <View style={styles.rowMain}>
                     <Text style={styles.rowTitle} numberOfLines={2}>
                       {item.name}
@@ -189,12 +247,16 @@ export function ProductPickerModal({ visible, onClose, onAdd, cartQuantities, li
                       {inCart > 0 ? <Text style={styles.tagInCart}>{inCart} in order</Text> : null}
                     </View>
                   </View>
-                  <PressableScale
-                    style={[styles.addButton, limitReached && styles.addButtonDisabled]}
-                    disabled={limitReached}
-                    onPress={() => onAdd(item)}>
-                    <Ionicons name="add" size={22} color="#fff" />
-                  </PressableScale>
+                  {inCart > 0 ? (
+                    <QuantityStepper quantity={inCart} onChange={(quantity) => onSetQuantity(item, quantity)} />
+                  ) : (
+                    <PressableScale
+                      style={[styles.addButton, limitReached && styles.addButtonDisabled]}
+                      disabled={limitReached}
+                      onPress={() => onAdd(item)}>
+                      <Ionicons name="add" size={22} color="#fff" />
+                    </PressableScale>
+                  )}
                 </View>
               );
             }}
@@ -256,6 +318,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
+  rowInCart: { borderColor: colors.primary },
   rowMain: { flex: 1, gap: 3 },
   rowTitle: { fontSize: 15, fontWeight: '600', color: colors.text },
   rowMeta: { fontSize: 12, color: colors.textMuted },
@@ -300,4 +363,30 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   addButtonDisabled: { opacity: 0.4 },
+  stepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    overflow: 'hidden',
+    backgroundColor: colors.surface,
+  },
+  stepButton: {
+    width: 36,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surfaceMuted,
+  },
+  stepButtonPressed: { backgroundColor: colors.border },
+  qtyInput: {
+    width: 56,
+    height: 40,
+    textAlign: 'center',
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text,
+    paddingVertical: 0,
+  },
 });

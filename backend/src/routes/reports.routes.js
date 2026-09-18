@@ -3,6 +3,7 @@ import asyncHandler from '../utils/asyncHandler.js';
 import ApiError from '../utils/ApiError.js';
 import authenticate from '../middleware/authenticate.js';
 import {
+  getCompanySales,
   getCustomerSales,
   getDailySales,
   getMonthlySales,
@@ -16,7 +17,9 @@ router.use(authenticate);
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-// The reports PROJECT_SPEC.md §18 requires. "Date-range Sales" isn't a
+// The reports PROJECT_SPEC.md §18 requires, plus company-wise — the
+// product report rolled up by manufacturer, which is how a distributor's
+// suppliers actually ask for the numbers. "Date-range Sales" isn't a
 // different grouping — it's the totals for a chosen period — so it maps to
 // the summary that every report already returns, with no rows of its own.
 //
@@ -28,6 +31,7 @@ const REPORTS = {
   monthly: getMonthlySales,
   customer: getCustomerSales,
   product: getProductSales,
+  company: getCompanySales,
   range: null,
 };
 

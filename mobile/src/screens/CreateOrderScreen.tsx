@@ -182,7 +182,26 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
         );
       }
       if (current.length >= MAX_ITEMS) return current;
-      return [...current, { product, quantity: '1', discount: String(product.discount) }];
+      // Newest first: the line just added is the one the booker is about
+      // to look at, so it goes to the top rather than below everything.
+      return [{ product, quantity: '1', discount: String(product.discount) }, ...current];
+    });
+  }
+
+  // The picker's quantity stepper: sets the figure outright. Zero takes the
+  // line off the order, the way the trash icon on the order screen does.
+  function setProductQuantity(product: Product, quantity: number) {
+    setSuccess(null);
+    setValidationError(null);
+    setLines((current) => {
+      const existingIndex = current.findIndex((line) => line.product.id === product.id);
+      if (quantity <= 0) return current.filter((line) => line.product.id !== product.id);
+      const clamped = String(Math.min(quantity, MAX_QUANTITY));
+      if (existingIndex >= 0) {
+        return current.map((line, index) => (index === existingIndex ? { ...line, quantity: clamped } : line));
+      }
+      if (current.length >= MAX_ITEMS) return current;
+      return [{ product, quantity: clamped, discount: String(product.discount) }, ...current];
     });
   }
 
@@ -565,6 +584,7 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
         visible={productPickerOpen}
         onClose={() => setProductPickerOpen(false)}
         onAdd={addProduct}
+        onSetQuantity={setProductQuantity}
         cartQuantities={cartQuantities}
         limitReached={lines.length >= MAX_ITEMS}
       />
