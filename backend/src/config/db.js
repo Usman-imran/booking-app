@@ -2,26 +2,27 @@ import pg from 'pg';
 
 const { Pool } = pg;
 
-// PostgreSQL connection pool. Not connected eagerly at startup so the
-// backend can run even before a database is provisioned. Business
-// modules (Stage 3+) will import this pool to run queries.
+// Check if running in production to enable SSL
+const isProduction = process.env.NODE_ENV === 'production';
+
+// PostgreSQL connection pool.
 const pool = new Pool(
   process.env.DATABASE_URL
-    ? { connectionString: process.env.DATABASE_URL }
+    ? {
+        connectionString: process.env.DATABASE_URL,
+        ssl: isProduction ? { rejectUnauthorized: false } : false,
+      }
     : {
         host: process.env.PGHOST,
         port: process.env.PGPORT ? Number(process.env.PGPORT) : 5432,
         user: process.env.PGUSER,
         password: process.env.PGPASSWORD,
         database: process.env.PGDATABASE,
+        ssl: isProduction ? { rejectUnauthorized: false } : false,
       }
 );
 
-// An idle pooled connection can be dropped by the server (Postgres
-// restart, network blip). Without a listener that surfaces as an unhandled
-// 'error' event, which crashes the whole process — and every request from
-// then on fails in the browser as "Failed to fetch". Log it instead; the
-// pool replaces the connection on the next query.
+// Idle connection error handling
 pool.on('error', (err) => {
   console.error('Unexpected error on idle database connection:', err.message);
 });
