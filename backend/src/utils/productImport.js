@@ -324,9 +324,10 @@ function validateRow(row) {
     mrp,
     salePrice: salePrice === undefined || salePrice === null ? 0 : salePrice,
     discount,
-    schemeEnabled: purchaseQty > 0,
-    schemePurchaseQty: purchaseQty > 0 ? purchaseQty : null,
-    schemeBonusQty: purchaseQty > 0 ? bonusQty : null,
+    // A sheet describes ONE tier per product. It replaces whatever tiers the
+    // product had, so a product with several is best left blank here and
+    // edited in the app.
+    bonusSchemes: purchaseQty > 0 ? [{ purchaseQty, bonusQty }] : [],
   };
 
   // A cell counts as "provided" when it held something — not merely when it
@@ -446,11 +447,7 @@ export function validateImportRows(rows, { productsByCode = new Map(), productsB
       if (provided.mrp) patch.mrp = values.mrp;
       if (provided.salePrice) patch.salePrice = values.salePrice;
       if (provided.discount) patch.discount = values.discount;
-      if (provided.scheme) {
-        patch.schemeEnabled = values.schemeEnabled;
-        patch.schemePurchaseQty = values.schemePurchaseQty;
-        patch.schemeBonusQty = values.schemeBonusQty;
-      }
+      if (provided.scheme) patch.bonusSchemes = values.bonusSchemes;
 
       updates.push({
         row: row.rowNumber,

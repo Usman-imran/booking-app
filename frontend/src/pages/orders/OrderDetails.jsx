@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { cancelOrder, deleteDraftOrder, getOrder, submitDraftOrder } from '../../api/orders.js';
 import ConfirmDialog from '../../components/ConfirmDialog.jsx';
-import { formatScheme } from '../products/schemeFormat.js';
+import { formatTier } from '../products/schemeFormat.js';
 import { formatMoney } from './orderCalc.js';
 import OrderStatusBadge from './OrderStatusBadge.jsx';
 import OrderReceiptModal from '../../components/orders/OrderReceiptModal.jsx';
@@ -289,11 +289,9 @@ export default function OrderDetails() {
                     <td className="numeric">{formatMoney(item.rate)}</td>
                     <td className="numeric">{item.paidQty}</td>
                     <td>
-                      {formatScheme({
-                        schemeEnabled: item.schemePurchaseQty !== null,
-                        schemePurchaseQty: item.schemePurchaseQty,
-                        schemeBonusQty: item.schemeBonusQty,
-                      })}
+                      {item.schemePurchaseQty !== null
+                        ? formatTier({ purchaseQty: item.schemePurchaseQty, bonusQty: item.schemeBonusQty })
+                        : 'No scheme'}
                     </td>
                     <td className="numeric">
                       {item.bonusQty > 0 ? <span className="bonus-badge">+{item.bonusQty}</span> : '—'}

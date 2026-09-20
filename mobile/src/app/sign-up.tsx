@@ -1,9 +1,11 @@
+import { Ionicons } from '@expo/vector-icons';
 import { Link, router } from 'expo-router';
 import { useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -41,6 +43,8 @@ export default function SignUp() {
   const { adoptSession } = useAuth();
 
   const [values, setValues] = useState(EMPTY_FORM);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -122,20 +126,44 @@ export default function SignUp() {
         />
 
         <Text style={styles.label}>Password</Text>
-        <TextInput
-          style={styles.input}
-          value={values.password}
-          onChangeText={handleChange('password')}
-          secureTextEntry
-        />
+        <View style={styles.passwordRow}>
+          <TextInput
+            style={[styles.input, styles.passwordInput]}
+            value={values.password}
+            onChangeText={handleChange('password')}
+            secureTextEntry={!showPassword}
+          />
+          <Pressable
+            style={styles.eyeButton}
+            onPress={() => setShowPassword((current) => !current)}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}>
+            <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={22} color="#5b6472" />
+          </Pressable>
+        </View>
 
         <Text style={styles.label}>Confirm password</Text>
-        <TextInput
-          style={styles.input}
-          value={values.confirmPassword}
-          onChangeText={handleChange('confirmPassword')}
-          secureTextEntry
-        />
+        <View style={styles.passwordRow}>
+          <TextInput
+            style={[styles.input, styles.passwordInput]}
+            value={values.confirmPassword}
+            onChangeText={handleChange('confirmPassword')}
+            secureTextEntry={!showConfirmPassword}
+          />
+          <Pressable
+            style={styles.eyeButton}
+            onPress={() => setShowConfirmPassword((current) => !current)}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={showConfirmPassword ? 'Hide password' : 'Show password'}>
+            <Ionicons
+              name={showConfirmPassword ? 'eye-off-outline' : 'eye-outline'}
+              size={22}
+              color="#5b6472"
+            />
+          </Pressable>
+        </View>
 
         <Text style={styles.note}>
           At least {MIN_PASSWORD_LENGTH} characters. There is no password reset in this application, so
@@ -176,6 +204,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
     backgroundColor: '#f8f9fb',
   },
+  passwordRow: { flexDirection: 'row', alignItems: 'center' },
+  passwordInput: { flex: 1, paddingRight: 48 },
+  eyeButton: { position: 'absolute', right: 0, height: '100%', justifyContent: 'center', paddingHorizontal: 12 },
   note: { fontSize: 12, color: '#5b6472', marginTop: 14 },
   button: {
     backgroundColor: '#208AEF',

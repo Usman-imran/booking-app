@@ -17,6 +17,8 @@
 //      exactly after the insert, instead of failing the check constraint by
 //      a fraction of a paisa.
 
+import { applicableScheme, calculateBonusQty as bonusForSchemes } from './bonusSchemes.js';
+
 const CENTS = 100;
 
 // Largest value a numeric(14,2) money column can hold. Order/line amounts
@@ -33,32 +35,20 @@ function fromCents(cents) {
   return cents / CENTS;
 }
 
-// PROJECT_SPEC.md §9: Bonus Quantity = floor(Q / P) x B, where P is the
-// scheme's purchase quantity and B its bonus quantity. A "20 + 2" scheme
-// gives 2 at qty 20, 4 at qty 40, 2 at qty 25, and 0 at qty 19.
+// PROJECT_SPEC.md §9: Bonus Quantity = floor(Q / P) x B, where P and B are
+// the purchase and bonus quantity of the tier that applies to Q — the
+// highest of the product's tiers Q reaches (bonusSchemes.js). A "20 + 2"
+// scheme gives 2 at qty 20, 4 at qty 40, 2 at qty 25, and 0 at qty 19.
 //
 // Bonus quantity is never part of the paid quantity and carries zero sales
 // value — it only ever affects the physical quantity shipped.
-export function calculateBonusQty(product, paidQty) {
-  if (!schemeApplies(product)) {
-    return 0;
-  }
-  return Math.floor(paidQty / product.schemePurchaseQty) * product.schemeBonusQty;
-}
-
-// A scheme is only usable if it is enabled AND both quantities are present
-// and sane. Product validation already guarantees this, but an order must
-// never be the thing that discovers a half-configured scheme: it would
+//
+// Product validation guarantees every stored tier is sane, but an order
+// must never be the thing that discovers a half-configured one: it would
 // either divide by zero or write a snapshot that violates the order_items
-// "both-or-neither" check constraint.
-function schemeApplies(product) {
-  return (
-    Boolean(product.schemeEnabled) &&
-    Number.isInteger(product.schemePurchaseQty) &&
-    product.schemePurchaseQty > 0 &&
-    Number.isInteger(product.schemeBonusQty) &&
-    product.schemeBonusQty >= 0
-  );
+// "both-or-neither" check constraint. The helpers ignore any such tier.
+export function calculateBonusQty(product, paidQty) {
+  return bonusForSchemes(product.bonusSchemes, paidQty);
 }
 
 // Builds one order line from the product's CURRENT values. Everything the
@@ -90,7 +80,9 @@ export function buildOrderLine(product, paidQty, { discount } = {}) {
   const lineDiscountCents = Math.round((lineSubtotalCents * discountHundredths) / (100 * CENTS));
   const lineTotalCents = lineSubtotalCents - lineDiscountCents;
 
-  const applies = schemeApplies(product);
+  // The one tier that served this quantity is what gets frozen onto the
+  // line, so the receipt can show "20 + 2" next to the bonus it produced.
+  const tier = applicableScheme(product.bonusSchemes, paidQty);
 
   return {
     productId: product.id,
@@ -101,8 +93,8 @@ export function buildOrderLine(product, paidQty, { discount } = {}) {
     discount: effectiveDiscount,
     paidQty,
     bonusQty: calculateBonusQty(product, paidQty),
-    schemePurchaseQty: applies ? product.schemePurchaseQty : null,
-    schemeBonusQty: applies ? product.schemeBonusQty : null,
+    schemePurchaseQty: tier ? tier.purchaseQty : null,
+    schemeBonusQty: tier ? tier.bonusQty : null,
     lineSubtotal: fromCents(lineSubtotalCents),
     lineDiscount: fromCents(lineDiscountCents),
     lineTotal: fromCents(lineTotalCents),

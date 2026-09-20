@@ -22,6 +22,7 @@ import {
   parseProductWorkbook,
   validateImportRows,
 } from '../utils/productImport.js';
+import { isValidTier } from '../utils/bonusSchemes.js';
 
 const router = Router();
 
@@ -37,6 +38,9 @@ const FIELD_LIMITS = {
   packing: 100,
   unit: 50,
 };
+
+// More tiers than this is a data-entry mistake, not a scheme.
+const MAX_BONUS_SCHEMES = 10;
 
 // Uploads are held in memory and parsed straight from the buffer: an
 // import is a few hundred kilobytes at most and is consumed immediately, so
@@ -98,10 +102,10 @@ function toFiniteNumber(value) {
 }
 
 // Validates and normalizes a create/update payload. In partial mode
-// (updates), a field missing from the body is left untouched — except the
-// bonus-scheme fields, which are always re-derived together (see below) so
-// the row can never end up in an inconsistent scheme state.
-function validateProductPayload(body, { partial, existing }) {
+// (updates), a field missing from the body is left untouched — including
+// the bonus schemes, which are only rewritten when the body speaks about
+// them (see below), so an unrelated field update can't clobber them.
+function validateProductPayload(body, { partial }) {
   const errors = [];
   const data = {};
 
@@ -183,72 +187,82 @@ function validateProductPayload(body, { partial, existing }) {
     data.discount = 0;
   }
 
-  // --- Bonus scheme (PROJECT_SPEC.md §8/§9) ---
-  // The scheme is only valid as a whole (enabled + both quantities, or
-  // disabled) — never touch just one of the three fields. On a partial
-  // update, if none of them are present in the body, leave the existing
-  // scheme completely alone (don't even include it in `data`), so an
-  // unrelated field update can't clobber a concurrent scheme change.
-  function readOptionalInteger(field) {
-    const value = body[field];
-    if (value === undefined) {
-      return { present: false, value: null };
+  // --- Bonus schemes (PROJECT_SPEC.md §8/§9) ---
+  // `bonusSchemes` is the list of tiers, `[{ purchaseQty, bonusQty }, ...]`,
+  // and an empty list means no scheme. The older single-scheme trio
+  // (`schemeEnabled` / `schemePurchaseQty` / `schemeBonusQty`) is still
+  // accepted as shorthand for a zero- or one-tier list, so an older client
+  // keeps working — but when both forms are sent the list wins. On a
+  // partial update, a body that mentions none of these leaves the product's
+  // schemes completely alone.
+  function readBonusSchemes() {
+    const list = body.bonusSchemes;
+    if (!Array.isArray(list)) {
+      errors.push('bonusSchemes must be an array of { purchaseQty, bonusQty }.');
+      return undefined;
     }
-    if (value === null) {
-      return { present: true, value: null };
+    if (list.length > MAX_BONUS_SCHEMES) {
+      errors.push(`bonusSchemes may hold at most ${MAX_BONUS_SCHEMES} tiers.`);
+      return undefined;
     }
-    const num = Number(value);
-    if (!Number.isInteger(num)) {
-      errors.push(`${field} must be an integer.`);
-      return { present: true, value: null };
+
+    const tiers = [];
+    const seen = new Set();
+    for (const [index, raw] of list.entries()) {
+      const tier =
+        raw && typeof raw === 'object'
+          ? { purchaseQty: toFiniteNumber(raw.purchaseQty), bonusQty: toFiniteNumber(raw.bonusQty) }
+          : null;
+      if (!isValidTier(tier)) {
+        errors.push(
+          `bonusSchemes[${index}] must have a positive whole purchaseQty and a bonusQty of zero or more.`
+        );
+        return undefined;
+      }
+      if (seen.has(tier.purchaseQty)) {
+        errors.push(`bonusSchemes lists the purchase quantity ${tier.purchaseQty} more than once.`);
+        return undefined;
+      }
+      seen.add(tier.purchaseQty);
+      tiers.push(tier);
     }
-    return { present: true, value: num };
+    return tiers.sort((a, b) => a.purchaseQty - b.purchaseQty);
   }
 
-  const schemeEnabledProvided = body.schemeEnabled !== undefined;
-  const purchaseQtyInput = readOptionalInteger('schemePurchaseQty');
-  const bonusQtyInput = readOptionalInteger('schemeBonusQty');
-  const schemeTouched = schemeEnabledProvided || purchaseQtyInput.present || bonusQtyInput.present;
-
-  if (!partial || schemeTouched) {
-    let schemeEnabled;
-    if (schemeEnabledProvided) {
-      if (typeof body.schemeEnabled !== 'boolean') {
-        errors.push('schemeEnabled must be a boolean.');
-      } else {
-        schemeEnabled = body.schemeEnabled;
-      }
-    } else {
-      // Create defaults to false; a partial update that only touches the
-      // quantities keeps whatever the row's current enabled flag is.
-      schemeEnabled = partial ? Boolean(existing?.scheme_enabled) : false;
+  function readLegacyScheme() {
+    const enabled = body.schemeEnabled;
+    if (enabled !== undefined && typeof enabled !== 'boolean') {
+      errors.push('schemeEnabled must be a boolean.');
+      return undefined;
     }
+    // A quantity without an explicit flag means the scheme is on.
+    const isOn = enabled === undefined ? true : enabled;
+    if (!isOn) return [];
 
-    const effectivePurchaseQty = purchaseQtyInput.present
-      ? purchaseQtyInput.value
-      : partial
-        ? (existing?.scheme_purchase_qty ?? null)
-        : null;
-    const effectiveBonusQty = bonusQtyInput.present
-      ? bonusQtyInput.value
-      : partial
-        ? (existing?.scheme_bonus_qty ?? null)
-        : null;
-
-    if (schemeEnabled === true) {
-      if (!(Number.isInteger(effectivePurchaseQty) && effectivePurchaseQty > 0)) {
-        errors.push('schemePurchaseQty must be a positive integer when the scheme is enabled.');
-      }
-      if (!(Number.isInteger(effectiveBonusQty) && effectiveBonusQty >= 0)) {
-        errors.push('schemeBonusQty must be zero or a positive integer when the scheme is enabled.');
-      }
+    const purchaseQty = body.schemePurchaseQty === null ? null : toFiniteNumber(body.schemePurchaseQty);
+    const bonusQty = body.schemeBonusQty === null ? null : toFiniteNumber(body.schemeBonusQty);
+    if (!(Number.isInteger(purchaseQty) && purchaseQty > 0)) {
+      errors.push('schemePurchaseQty must be a positive integer when the scheme is enabled.');
+      return undefined;
     }
-
-    if (schemeEnabled !== undefined) {
-      data.schemeEnabled = schemeEnabled;
-      data.schemePurchaseQty = schemeEnabled ? effectivePurchaseQty : null;
-      data.schemeBonusQty = schemeEnabled ? effectiveBonusQty : null;
+    if (!(Number.isInteger(bonusQty) && bonusQty >= 0)) {
+      errors.push('schemeBonusQty must be zero or a positive integer when the scheme is enabled.');
+      return undefined;
     }
+    return [{ purchaseQty, bonusQty }];
+  }
+
+  const legacyTouched =
+    body.schemeEnabled !== undefined || body.schemePurchaseQty !== undefined || body.schemeBonusQty !== undefined;
+
+  if (body.bonusSchemes !== undefined) {
+    const tiers = readBonusSchemes();
+    if (tiers !== undefined) data.bonusSchemes = tiers;
+  } else if (legacyTouched) {
+    const tiers = readLegacyScheme();
+    if (tiers !== undefined) data.bonusSchemes = tiers;
+  } else if (!partial) {
+    data.bonusSchemes = [];
   }
 
   if (partial && body.isActive !== undefined) {
@@ -457,10 +471,7 @@ async function inspectUpload(req, res) {
       mrp: 'mrp' in row.patch ? row.patch.mrp : Number(row.existing.mrp),
       salePrice: 'salePrice' in row.patch ? row.patch.salePrice : Number(row.existing.sale_price),
       discount: 'discount' in row.patch ? row.patch.discount : Number(row.existing.discount),
-      schemeEnabled: 'schemeEnabled' in row.patch ? row.patch.schemeEnabled : row.existing.scheme_enabled,
-      schemePurchaseQty:
-        'schemePurchaseQty' in row.patch ? row.patch.schemePurchaseQty : row.existing.scheme_purchase_qty,
-      schemeBonusQty: 'schemeBonusQty' in row.patch ? row.patch.schemeBonusQty : row.existing.scheme_bonus_qty,
+      bonusSchemes: 'bonusSchemes' in row.patch ? row.patch.bonusSchemes : row.existing.bonus_schemes,
     };
     const { errors: schemaErrors } = validateProductPayload(merged, { partial: false });
     if (schemaErrors.length > 0) {
@@ -641,7 +652,7 @@ router.put(
       throw new ApiError(404, 'Product not found.');
     }
 
-    const { data, errors } = validateProductPayload(req.body ?? {}, { partial: true, existing });
+    const { data, errors } = validateProductPayload(req.body ?? {}, { partial: true });
     if (errors.length > 0) {
       throw new ApiError(400, errors[0], errors);
     }

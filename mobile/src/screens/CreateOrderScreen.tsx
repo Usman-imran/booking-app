@@ -22,7 +22,7 @@ import {
   type OrderItem,
 } from '@/lib/api/orders';
 import { listProducts, type Product } from '@/lib/api/products';
-import { calculateLine, calculateTotals } from '@/lib/orderCalc';
+import { applicableScheme, calculateLine, calculateTotals, formatScheme } from '@/lib/orderCalc';
 import { cardShadow, colors, formatMoney, radius, spacing } from '@/lib/theme';
 
 // Mirrors the backend's own caps so the booker is told before a request is
@@ -46,12 +46,15 @@ function parseDiscount(value: string): number | null {
 }
 
 // True when a product's price or scheme differs from the snapshot stored on
-// a saved draft line - i.e. reopening the draft has re-priced it.
+// a saved draft line - i.e. reopening the draft has re-priced it. The
+// snapshot holds the one tier that served the line's quantity, so that is
+// what the product's current tiers are compared against.
 function hasRepriced(item: OrderItem, product: Product) {
+  const tier = applicableScheme(product, item.paidQty);
   return (
     product.salePrice !== item.rate ||
-    (product.schemeEnabled ? product.schemePurchaseQty : null) !== item.schemePurchaseQty ||
-    (product.schemeEnabled ? product.schemeBonusQty : null) !== item.schemeBonusQty
+    (tier ? tier.purchaseQty : null) !== item.schemePurchaseQty ||
+    (tier ? tier.bonusQty : null) !== item.schemeBonusQty
   );
 }
 
@@ -500,9 +503,9 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
               <View style={styles.lineFoot}>
                 {calc.bonusQty > 0 ? (
                   <Text style={styles.bonusBadge}>+{calc.bonusQty} Bonus Free</Text>
-                ) : product.schemeEnabled ? (
-                  <Text style={styles.muted}>
-                    {product.schemePurchaseQty}+{product.schemeBonusQty} scheme
+                ) : product.bonusSchemes.length > 0 ? (
+                  <Text style={styles.muted} numberOfLines={1}>
+                    {formatScheme(product)} scheme
                   </Text>
                 ) : (
                   <View />

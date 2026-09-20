@@ -1,4 +1,5 @@
 import pool from '../config/db.js';
+import { normaliseSchemes } from '../utils/bonusSchemes.js';
 import { AUTO_CODE_PREFIX } from '../utils/productImport.js';
 
 // Every product belongs to exactly one user (owner_id) and is invisible to
@@ -6,7 +7,31 @@ import { AUTO_CODE_PREFIX } from '../utils/productImport.js';
 // into the WHERE clause, so a product id belonging to another account
 // behaves exactly like one that doesn't exist.
 const SELECT_FIELDS =
-  'id, name, code, company, packing, unit, mrp, sale_price, discount, scheme_enabled, scheme_purchase_qty, scheme_bonus_qty, is_active, created_at, updated_at';
+  'id, name, code, company, packing, unit, mrp, sale_price, discount, bonus_schemes, is_active, created_at, updated_at';
+
+// `bonus_schemes` is JSONB. pg would serialise a JavaScript array as a
+// Postgres ARRAY literal, which the column rejects, so the value is always
+// handed over as a JSON string. Readers get it back already parsed.
+function serialiseSchemes(schemes) {
+  return JSON.stringify(normaliseSchemes(schemes));
+}
+
+// Column values for one row, in a fixed order shared by the single insert
+// and the bulk insert so the two can never disagree.
+function insertValues(ownerId, data) {
+  return [
+    ownerId,
+    data.name,
+    data.code,
+    data.company ?? null,
+    data.packing ?? null,
+    data.unit ?? null,
+    data.mrp,
+    data.salePrice,
+    data.discount,
+    serialiseSchemes(data.bonusSchemes),
+  ];
+}
 
 const UPDATABLE_COLUMNS = {
   name: 'name',
@@ -17,11 +42,15 @@ const UPDATABLE_COLUMNS = {
   mrp: 'mrp',
   salePrice: 'sale_price',
   discount: 'discount',
-  schemeEnabled: 'scheme_enabled',
-  schemePurchaseQty: 'scheme_purchase_qty',
-  schemeBonusQty: 'scheme_bonus_qty',
+  bonusSchemes: 'bonus_schemes',
   isActive: 'is_active',
 };
+
+// The parameter value for an updatable field. Only the schemes need any
+// translation; everything else is stored as given.
+function columnValue(field, value) {
+  return field === 'bonusSchemes' ? serialiseSchemes(value) : value;
+}
 
 export async function findProductById(ownerId, id) {
   const { rows } = await pool.query(`SELECT ${SELECT_FIELDS} FROM products WHERE owner_id = $1 AND id = $2`, [
@@ -58,23 +87,10 @@ export async function findProductsByIds(ownerId, ids, client = pool) {
 
 export async function createProduct(ownerId, data) {
   const { rows } = await pool.query(
-    `INSERT INTO products (owner_id, name, code, company, packing, unit, mrp, sale_price, discount, scheme_enabled, scheme_purchase_qty, scheme_bonus_qty)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+    `INSERT INTO products (owner_id, name, code, company, packing, unit, mrp, sale_price, discount, bonus_schemes)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
      RETURNING ${SELECT_FIELDS}`,
-    [
-      ownerId,
-      data.name,
-      data.code,
-      data.company ?? null,
-      data.packing ?? null,
-      data.unit ?? null,
-      data.mrp,
-      data.salePrice,
-      data.discount,
-      data.schemeEnabled,
-      data.schemePurchaseQty,
-      data.schemeBonusQty,
-    ]
+    insertValues(ownerId, data)
   );
   return rows[0];
 }
@@ -200,28 +216,13 @@ export async function bulkUpsertProducts(ownerId, { inserts = [], updates = [] }
         'mrp',
         'sale_price',
         'discount',
-        'scheme_enabled',
-        'scheme_purchase_qty',
-        'scheme_bonus_qty',
+        'bonus_schemes',
       ];
 
       const params = [];
       const valueGroups = inserts.map((data) => {
         const offset = params.length;
-        params.push(
-          ownerId,
-          data.name,
-          data.code,
-          data.company ?? null,
-          data.packing ?? null,
-          data.unit ?? null,
-          data.mrp,
-          data.salePrice,
-          data.discount,
-          data.schemeEnabled,
-          data.schemePurchaseQty,
-          data.schemeBonusQty
-        );
+        params.push(...insertValues(ownerId, data));
         return `(${columns.map((_, index) => `$${offset + index + 1}`).join(', ')})`;
       });
 
@@ -247,7 +248,7 @@ export async function bulkUpsertProducts(ownerId, { inserts = [], updates = [] }
 
       for (const [field, column] of Object.entries(UPDATABLE_COLUMNS)) {
         if (Object.prototype.hasOwnProperty.call(patch, field)) {
-          params.push(patch[field]);
+          params.push(columnValue(field, patch[field]));
           setClauses.push(`${column} = $${params.length}`);
         }
       }
@@ -283,7 +284,7 @@ export async function updateProduct(ownerId, id, data) {
 
   for (const [field, column] of Object.entries(UPDATABLE_COLUMNS)) {
     if (Object.prototype.hasOwnProperty.call(data, field)) {
-      params.push(data[field]);
+      params.push(columnValue(field, data[field]));
       setClauses.push(`${column} = $${params.length}`);
     }
   }
@@ -391,7 +392,14 @@ export async function listCompaniesWithCounts(ownerId) {
   return rows.map((row) => ({ company: row.company, productCount: row.product_count }));
 }
 
+// `bonusSchemes` is the full, sorted list of tiers. The three single-scheme
+// fields alongside it describe the FIRST tier (or no scheme) and exist for
+// readers that only ever show one — the "20 + 2" badge on a list row, say.
+// They are derived, never stored, and the API accepts them on input only as
+// a shorthand for a one-tier array.
 export function toPublicProduct(product) {
+  const bonusSchemes = normaliseSchemes(product.bonus_schemes);
+  const first = bonusSchemes[0] ?? null;
   return {
     id: product.id,
     name: product.name,
@@ -402,9 +410,10 @@ export function toPublicProduct(product) {
     mrp: Number(product.mrp),
     salePrice: Number(product.sale_price),
     discount: Number(product.discount),
-    schemeEnabled: product.scheme_enabled,
-    schemePurchaseQty: product.scheme_purchase_qty,
-    schemeBonusQty: product.scheme_bonus_qty,
+    bonusSchemes,
+    schemeEnabled: first !== null,
+    schemePurchaseQty: first ? first.purchaseQty : null,
+    schemeBonusQty: first ? first.bonusQty : null,
     isActive: product.is_active,
     createdAt: product.created_at,
     updatedAt: product.updated_at,

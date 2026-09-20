@@ -17,11 +17,12 @@ import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { PressableScale } from '@/components/PressableScale';
 import { listProducts, type Product } from '@/lib/api/products';
+import { formatTier } from '@/lib/orderCalc';
 import { cardShadow, colors, formatMoney, radius, spacing } from '@/lib/theme';
 import { usePaginatedList, useRevalidateOnFocus } from '@/lib/usePaginatedList';
 
 function ProductCard({ product, onPress }: { product: Product; onPress: () => void }) {
-  const hasScheme = product.schemeEnabled && product.schemePurchaseQty && product.schemeBonusQty;
+  const hasScheme = product.bonusSchemes.length > 0;
   return (
     <PressableScale style={styles.card} onPress={onPress}>
       <View style={styles.cardIcon}>
@@ -38,8 +39,8 @@ function ProductCard({ product, onPress }: { product: Product; onPress: () => vo
         <View style={styles.tags}>
           {!product.isActive ? <Text style={[styles.tag, styles.tagInactive]}>Inactive</Text> : null}
           {hasScheme ? (
-            <Text style={[styles.tag, styles.tagScheme]}>
-              {product.schemePurchaseQty}+{product.schemeBonusQty} free
+            <Text style={[styles.tag, styles.tagScheme]} numberOfLines={1}>
+              {product.bonusSchemes.map(formatTier).join(', ')} free
             </Text>
           ) : null}
           {product.discount > 0 ? <Text style={[styles.tag, styles.tagDiscount]}>{product.discount}% off</Text> : null}

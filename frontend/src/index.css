@@ -2296,3 +2296,45 @@ a {
   color: #6b7280;
 }
 
+
+/* Bonus scheme tiers on the product form */
+
+.form-hint {
+  margin: -0.25rem 0 0.75rem;
+  font-size: 0.85rem;
+  color: #6b7280;
+}
+
+.scheme-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 1rem;
+  align-items: end;
+  margin-bottom: 0.75rem;
+}
+
+.scheme-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: #374151;
+}
+
+.scheme-row input {
+  padding: 0.55rem 0.7rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  font-family: inherit;
+}
+
+.scheme-row input:focus {
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
+}
+
+.scheme-row-remove {
+  padding: 0.5rem 0.7rem;
+  line-height: 1;
+}

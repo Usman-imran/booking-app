@@ -1,16 +1,23 @@
+import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
-import { StyleSheet, Switch, Text, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { Banner } from './Banner';
 import { Button } from './Button';
 import { Field } from './Field';
 import { FormScreen } from './FormScreen';
 import { ImagePickerField, type PickedImage } from './ImagePickerField';
-import type { ProductInput } from '@/lib/api/products';
+import type { BonusScheme, ProductInput } from '@/lib/api/products';
 import { colors, spacing } from '@/lib/theme';
 
 // Same character limits the API enforces (products.routes.js).
 const LIMITS = { name: 200, code: 50, company: 150, packing: 100, unit: 50 };
+
+// Same cap as the API: more tiers than this is a typo, not a scheme.
+const MAX_BONUS_SCHEMES = 10;
+
+// One editable scheme tier. `key` only exists so React can tell rows apart
+// as they are added and removed; it is never sent to the server.
+export type BonusSchemeRow = { key: string; buyQty: string; bonusQty: string };
 
 export type ProductFormValues = {
   name: string;
@@ -21,9 +28,7 @@ export type ProductFormValues = {
   mrp: string;
   salePrice: string;
   discount: string;
-  schemeEnabled: boolean;
-  schemePurchaseQty: string;
-  schemeBonusQty: string;
+  bonusSchemes: BonusSchemeRow[];
 };
 
 export const EMPTY_PRODUCT_FORM: ProductFormValues = {
@@ -35,10 +40,19 @@ export const EMPTY_PRODUCT_FORM: ProductFormValues = {
   mrp: '',
   salePrice: '',
   discount: '0',
-  schemeEnabled: false,
-  schemePurchaseQty: '',
-  schemeBonusQty: '',
+  bonusSchemes: [],
 };
+
+let nextRowKey = 0;
+
+export function newSchemeRow(tier?: BonusScheme): BonusSchemeRow {
+  nextRowKey += 1;
+  return {
+    key: `scheme-${nextRowKey}`,
+    buyQty: tier ? String(tier.purchaseQty) : '',
+    bonusQty: tier ? String(tier.bonusQty) : '',
+  };
+}
 
 function toNumberOrNull(value: string): number | null {
   if (value === '') return null;
@@ -56,54 +70,110 @@ type Props = {
   showPhotoPicker?: boolean;
 };
 
+type SchemeRowErrors = { buyQty?: boolean; bonusQty?: boolean };
+
+type FieldErrors = Partial<Record<Exclude<keyof ProductFormValues, 'bonusSchemes'>, boolean>> & {
+  // Keyed by the row's `key`, so an error stays with its row when another
+  // row above it is removed.
+  bonusSchemes?: Record<string, SchemeRowErrors>;
+};
+
 // The mobile counterpart of the web's ProductForm, shared by Add and Edit:
 // same fields, validation and payload. Numeric values stay strings in state
-// so a box can be cleared mid-edit; they are converted once, on submit.
+// so a box can be cleared mid-edit; they are converted once, on submit. A
+// missing or invalid field is flagged with a red border rather than a banner.
+//
+// A product can carry several bonus tiers ("10 + 1", "50 + 6", ...), so the
+// scheme section is a list of rows the booker adds to and removes from;
+// no rows means no scheme.
 export function ProductForm({ initialValues, submitLabel, onSubmit, onCancel, showPhotoPicker }: Props) {
   const [values, setValues] = useState<ProductFormValues>({ ...EMPTY_PRODUCT_FORM, ...initialValues });
   const [photo, setPhoto] = useState<PickedImage | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [errors, setErrors] = useState<FieldErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  function set<K extends keyof ProductFormValues>(field: K) {
+  function set<K extends Exclude<keyof ProductFormValues, 'bonusSchemes'>>(field: K) {
     return (value: ProductFormValues[K]) => {
-      setError(null);
+      setErrors((current) => (current[field] ? { ...current, [field]: false } : current));
       setValues((current) => ({ ...current, [field]: value }));
     };
   }
 
-  function validate(): string | null {
-    if (!values.name.trim() || !values.code.trim()) return 'Product name and code are required.';
+  function setSchemeField(key: string, field: 'buyQty' | 'bonusQty') {
+    return (text: string) => {
+      setErrors((current) => {
+        const rowErrors = current.bonusSchemes?.[key];
+        if (!rowErrors?.[field]) return current;
+        return { ...current, bonusSchemes: { ...current.bonusSchemes, [key]: { ...rowErrors, [field]: false } } };
+      });
+      setValues((current) => ({
+        ...current,
+        bonusSchemes: current.bonusSchemes.map((row) => (row.key === key ? { ...row, [field]: text } : row)),
+      }));
+    };
+  }
+
+  function addScheme() {
+    setValues((current) =>
+      current.bonusSchemes.length >= MAX_BONUS_SCHEMES
+        ? current
+        : { ...current, bonusSchemes: [...current.bonusSchemes, newSchemeRow()] }
+    );
+  }
+
+  function removeScheme(key: string) {
+    setValues((current) => ({ ...current, bonusSchemes: current.bonusSchemes.filter((row) => row.key !== key) }));
+    setErrors((current) => {
+      if (!current.bonusSchemes?.[key]) return current;
+      const { [key]: _removed, ...rest } = current.bonusSchemes;
+      return { ...current, bonusSchemes: rest };
+    });
+  }
+
+  // Same rules as the API, reported per field so every problem is
+  // highlighted at once instead of one message at a time.
+  function validate(): FieldErrors {
+    const problems: FieldErrors = {};
+    if (!values.name.trim()) problems.name = true;
+    if (!values.code.trim()) problems.code = true;
 
     const mrp = toNumberOrNull(values.mrp);
-    if (mrp === null || mrp < 0) return 'MRP must be a valid non-negative number.';
+    if (mrp === null || mrp < 0) problems.mrp = true;
 
     const salePrice = toNumberOrNull(values.salePrice);
-    if (salePrice === null || salePrice < 0) return 'Sale Price must be a valid non-negative number.';
+    if (salePrice === null || salePrice < 0) problems.salePrice = true;
 
     const discount = values.discount === '' ? 0 : toNumberOrNull(values.discount);
-    if (discount === null || discount < 0 || discount > 100) return 'Discount must be a number between 0 and 100.';
+    if (discount === null || discount < 0 || discount > 100) problems.discount = true;
 
-    if (values.schemeEnabled) {
-      const purchaseQty = toNumberOrNull(values.schemePurchaseQty);
-      if (purchaseQty === null || !Number.isInteger(purchaseQty) || purchaseQty <= 0) {
-        return 'Purchase Quantity must be a positive whole number when the bonus scheme is enabled.';
+    // Every row needs a positive whole purchase quantity and a bonus of
+    // zero or more, and no two rows may share a purchase quantity - the
+    // server could not tell which one applies.
+    const seenBuyQty = new Map<number, string>();
+    for (const row of values.bonusSchemes) {
+      const rowErrors: SchemeRowErrors = {};
+      const buyQty = toNumberOrNull(row.buyQty);
+      if (buyQty === null || !Number.isInteger(buyQty) || buyQty <= 0) {
+        rowErrors.buyQty = true;
+      } else if (seenBuyQty.has(buyQty)) {
+        rowErrors.buyQty = true;
+      } else {
+        seenBuyQty.set(buyQty, row.key);
       }
-      const bonusQty = toNumberOrNull(values.schemeBonusQty);
-      if (bonusQty === null || !Number.isInteger(bonusQty) || bonusQty < 0) {
-        return 'Bonus Quantity must be zero or a positive whole number when the bonus scheme is enabled.';
+      const bonusQty = toNumberOrNull(row.bonusQty);
+      if (bonusQty === null || !Number.isInteger(bonusQty) || bonusQty < 0) rowErrors.bonusQty = true;
+
+      if (rowErrors.buyQty || rowErrors.bonusQty) {
+        problems.bonusSchemes = { ...problems.bonusSchemes, [row.key]: rowErrors };
       }
     }
-    return null;
+    return problems;
   }
 
   async function handleSubmit() {
-    setError(null);
-    const problem = validate();
-    if (problem) {
-      setError(problem);
-      return;
-    }
+    const problems = validate();
+    setErrors(problems);
+    if (Object.keys(problems).length > 0) return;
 
     const payload: ProductInput = {
       name: values.name.trim(),
@@ -114,32 +184,39 @@ export function ProductForm({ initialValues, submitLabel, onSubmit, onCancel, sh
       mrp: toNumberOrNull(values.mrp) as number,
       salePrice: toNumberOrNull(values.salePrice) as number,
       discount: values.discount === '' ? 0 : (toNumberOrNull(values.discount) as number),
-      schemeEnabled: values.schemeEnabled,
-      schemePurchaseQty: values.schemeEnabled ? toNumberOrNull(values.schemePurchaseQty) : null,
-      schemeBonusQty: values.schemeEnabled ? toNumberOrNull(values.schemeBonusQty) : null,
+      bonusSchemes: values.bonusSchemes
+        .map((row) => ({ purchaseQty: Number(row.buyQty), bonusQty: Number(row.bonusQty) }))
+        .sort((a, b) => a.purchaseQty - b.purchaseQty),
     };
 
     setIsSubmitting(true);
     try {
       await onSubmit(payload);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong.');
+      Alert.alert('Could not save product', err instanceof Error ? err.message : 'Something went wrong.');
     } finally {
       setIsSubmitting(false);
     }
   }
 
-  const hasSchemePreview = values.schemeEnabled && values.schemePurchaseQty !== '' && values.schemeBonusQty !== '';
+  // "10 + 1, 50 + 6" for the rows that are filled in, in the order they
+  // will apply.
+  const schemePreview = values.bonusSchemes
+    .filter((row) => row.buyQty !== '' && row.bonusQty !== '')
+    .map((row) => ({ buy: Number(row.buyQty), bonus: Number(row.bonusQty) }))
+    .filter((tier) => Number.isFinite(tier.buy) && Number.isFinite(tier.bonus))
+    .sort((a, b) => a.buy - b.buy)
+    .map((tier) => `${tier.buy} + ${tier.bonus}`)
+    .join(', ');
 
   return (
     <FormScreen>
-      {error ? <Banner kind="error">{error}</Banner> : null}
-
       <Field
         label="Product Name"
         required
         value={values.name}
         onChangeText={set('name')}
+        error={errors.name}
         maxLength={LIMITS.name}
         autoCapitalize="words"
       />
@@ -148,6 +225,7 @@ export function ProductForm({ initialValues, submitLabel, onSubmit, onCancel, sh
         required
         value={values.code}
         onChangeText={set('code')}
+        error={errors.code}
         maxLength={LIMITS.code}
         autoCapitalize="characters"
         autoCorrect={false}
@@ -182,7 +260,15 @@ export function ProductForm({ initialValues, submitLabel, onSubmit, onCancel, sh
       <Text style={styles.sectionTitle}>Pricing</Text>
       <View style={styles.row}>
         <View style={styles.half}>
-          <Field label="MRP" required value={values.mrp} onChangeText={set('mrp')} keyboardType="decimal-pad" placeholder="0.00" />
+          <Field
+            label="MRP"
+            required
+            value={values.mrp}
+            onChangeText={set('mrp')}
+            error={errors.mrp}
+            keyboardType="decimal-pad"
+            placeholder="0.00"
+          />
         </View>
         <View style={styles.half}>
           <Field
@@ -190,6 +276,7 @@ export function ProductForm({ initialValues, submitLabel, onSubmit, onCancel, sh
             required
             value={values.salePrice}
             onChangeText={set('salePrice')}
+            error={errors.salePrice}
             keyboardType="decimal-pad"
             placeholder="0.00"
           />
@@ -199,56 +286,76 @@ export function ProductForm({ initialValues, submitLabel, onSubmit, onCancel, sh
         label="Discount"
         value={values.discount}
         onChangeText={set('discount')}
+        error={errors.discount}
         keyboardType="decimal-pad"
         suffix="%"
         hint="Default discount applied to this product on new orders. 0 to 100."
       />
 
-      <Text style={styles.sectionTitle}>Bonus Scheme</Text>
-      <View style={styles.switchRow}>
-        <View style={styles.flex1}>
-          <Text style={styles.switchLabel}>Enable bonus scheme</Text>
-          <Text style={styles.hint}>Give free units when a quantity threshold is reached.</Text>
-        </View>
-        <Switch
-          value={values.schemeEnabled}
-          onValueChange={set('schemeEnabled')}
-          trackColor={{ true: colors.primary, false: colors.border }}
-          thumbColor="#fff"
-        />
-      </View>
+      <Text style={styles.sectionTitle}>Bonus Schemes</Text>
+      <Text style={[styles.hint, styles.sectionHint]}>
+        Give free units when a quantity threshold is reached. Add a row per tier, e.g. 10 + 1 and 50 + 6; the highest
+        tier an order reaches is the one applied.
+      </Text>
 
-      {values.schemeEnabled ? (
-        <>
-          <View style={styles.row}>
-            <View style={styles.half}>
+      {values.bonusSchemes.map((row, index) => {
+        const rowErrors = errors.bonusSchemes?.[row.key];
+        return (
+          <View key={row.key} style={styles.schemeRow}>
+            <View style={styles.flex1}>
               <Field
-                label="Purchase Quantity"
+                label={`Buy Qty${index === 0 ? '' : ` (tier ${index + 1})`}`}
                 required
-                value={values.schemePurchaseQty}
-                onChangeText={set('schemePurchaseQty')}
+                value={row.buyQty}
+                onChangeText={setSchemeField(row.key, 'buyQty')}
+                error={rowErrors?.buyQty}
                 keyboardType="number-pad"
                 placeholder="e.g. 20"
               />
             </View>
-            <View style={styles.half}>
+            <View style={styles.flex1}>
               <Field
-                label="Bonus Quantity"
+                label="Bonus Qty"
                 required
-                value={values.schemeBonusQty}
-                onChangeText={set('schemeBonusQty')}
+                value={row.bonusQty}
+                onChangeText={setSchemeField(row.key, 'bonusQty')}
+                error={rowErrors?.bonusQty}
                 keyboardType="number-pad"
                 placeholder="e.g. 2"
               />
             </View>
+            <Pressable
+              onPress={() => removeScheme(row.key)}
+              disabled={isSubmitting}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel={`Remove bonus scheme ${index + 1}`}
+              style={({ pressed }) => [styles.removeButton, pressed && styles.removeButtonPressed]}>
+              <Ionicons name="trash-outline" size={20} color={colors.danger} />
+            </Pressable>
           </View>
-          <Text style={[styles.hint, styles.schemePreview]}>
-            {hasSchemePreview
-              ? `Example: buy ${values.schemePurchaseQty}, get ${values.schemeBonusQty} free - shown as "${values.schemePurchaseQty} + ${values.schemeBonusQty}".`
-              : 'Enter both quantities to see an example, e.g. 20 + 2.'}
-          </Text>
-        </>
+        );
+      })}
+
+      {values.bonusSchemes.length < MAX_BONUS_SCHEMES ? (
+        <Button
+          title="Add Bonus Scheme"
+          icon="add"
+          variant="secondary"
+          onPress={addScheme}
+          disabled={isSubmitting}
+          compact
+          style={styles.addScheme}
+        />
       ) : null}
+
+      <Text style={[styles.hint, styles.schemePreview]}>
+        {values.bonusSchemes.length === 0
+          ? 'No bonus scheme. Orders for this product will not earn free units.'
+          : schemePreview
+            ? `Shown as "${schemePreview}".`
+            : 'Enter both quantities to see how the scheme will be shown, e.g. 20 + 2.'}
+      </Text>
 
       <Text style={styles.required}>* Required</Text>
 
@@ -265,20 +372,14 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', gap: spacing.md },
   half: { flex: 1 },
   sectionTitle: { fontSize: 16, fontWeight: '700', color: colors.text, marginTop: spacing.sm, marginBottom: spacing.md },
-  switchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    padding: spacing.lg,
-    marginBottom: spacing.lg,
-  },
-  switchLabel: { fontSize: 15, fontWeight: '600', color: colors.text },
+  sectionHint: { marginTop: -spacing.sm, marginBottom: spacing.md },
   hint: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
-  schemePreview: { marginTop: -spacing.sm, marginBottom: spacing.lg },
+  schemeRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
+  // Lines the icon up with the input boxes, below the row's labels.
+  removeButton: { marginTop: 25, height: 48, width: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 8 },
+  removeButtonPressed: { backgroundColor: colors.dangerSoft },
+  addScheme: { alignSelf: 'flex-start', marginBottom: spacing.md },
+  schemePreview: { marginBottom: spacing.lg },
   required: { fontSize: 12, color: colors.textMuted, marginBottom: spacing.lg },
   actions: { flexDirection: 'row', gap: spacing.md },
 });

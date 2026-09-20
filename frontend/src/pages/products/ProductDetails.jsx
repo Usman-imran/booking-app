@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { deactivateProduct, getProduct, updateProduct } from '../../api/products.js';
 import ConfirmDialog from '../../components/ConfirmDialog.jsx';
-import { formatScheme } from './schemeFormat.js';
+import { formatScheme, formatTier } from './schemeFormat.js';
 
 export default function ProductDetails() {
   const { id } = useParams();
@@ -127,25 +127,21 @@ export default function ProductDetails() {
       </div>
 
       <div className="detail-card">
-        <h3 className="form-section-title">Bonus Scheme</h3>
-        {product.schemeEnabled ? (
+        <h3 className="form-section-title">{product.bonusSchemes.length > 1 ? 'Bonus Schemes' : 'Bonus Scheme'}</h3>
+        {product.bonusSchemes.length > 0 ? (
           <dl className="detail-grid">
-            <div>
-              <dt>Status</dt>
-              <dd>Enabled</dd>
-            </div>
             <div>
               <dt>Scheme</dt>
               <dd className="scheme-highlight">{formatScheme(product)}</dd>
             </div>
-            <div>
-              <dt>Purchase Quantity</dt>
-              <dd>{product.schemePurchaseQty}</dd>
-            </div>
-            <div>
-              <dt>Bonus Quantity</dt>
-              <dd>{product.schemeBonusQty}</dd>
-            </div>
+            {product.bonusSchemes.map((tier, index) => (
+              <div key={tier.purchaseQty}>
+                <dt>{product.bonusSchemes.length > 1 ? `Tier ${index + 1}` : 'Details'}</dt>
+                <dd>
+                  Buy {tier.purchaseQty}, get {tier.bonusQty} free ({formatTier(tier)})
+                </dd>
+              </div>
+            ))}
           </dl>
         ) : (
           <p>No bonus scheme configured for this product.</p>

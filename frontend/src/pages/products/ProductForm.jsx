@@ -1,5 +1,8 @@
 import { useState } from 'react';
 
+// Same cap as the API: more tiers than this is a typo, not a scheme.
+const MAX_BONUS_SCHEMES = 10;
+
 const EMPTY_FORM = {
   name: '',
   code: '',
@@ -9,10 +12,22 @@ const EMPTY_FORM = {
   mrp: '',
   salePrice: '',
   discount: '0',
-  schemeEnabled: false,
-  schemePurchaseQty: '',
-  schemeBonusQty: '',
+  // One row per tier: { key, buyQty, bonusQty }. `key` is only for React
+  // to tell rows apart as they come and go; it is never sent.
+  bonusSchemes: [],
 };
+
+let nextRowKey = 0;
+
+// A blank row, or one pre-filled from a saved tier.
+export function newSchemeRow(tier) {
+  nextRowKey += 1;
+  return {
+    key: `scheme-${nextRowKey}`,
+    buyQty: tier ? String(tier.purchaseQty) : '',
+    bonusQty: tier ? String(tier.bonusQty) : '',
+  };
+}
 
 function toNumberOrNull(value) {
   if (value === '' || value === null || value === undefined) return null;
@@ -27,9 +42,31 @@ export default function ProductForm({ initialValues, submitLabel, onSubmit, onCa
 
   function handleChange(field) {
     return (event) => {
-      const value = field === 'schemeEnabled' ? event.target.checked : event.target.value;
+      const value = event.target.value;
       setValues((current) => ({ ...current, [field]: value }));
     };
+  }
+
+  function handleSchemeChange(key, field) {
+    return (event) => {
+      const value = event.target.value;
+      setValues((current) => ({
+        ...current,
+        bonusSchemes: current.bonusSchemes.map((row) => (row.key === key ? { ...row, [field]: value } : row)),
+      }));
+    };
+  }
+
+  function addScheme() {
+    setValues((current) =>
+      current.bonusSchemes.length >= MAX_BONUS_SCHEMES
+        ? current
+        : { ...current, bonusSchemes: [...current.bonusSchemes, newSchemeRow()] }
+    );
+  }
+
+  function removeScheme(key) {
+    setValues((current) => ({ ...current, bonusSchemes: current.bonusSchemes.filter((row) => row.key !== key) }));
   }
 
   function validate() {
@@ -52,14 +89,22 @@ export default function ProductForm({ initialValues, submitLabel, onSubmit, onCa
       return 'Discount must be a number between 0 and 100.';
     }
 
-    if (values.schemeEnabled) {
-      const purchaseQty = toNumberOrNull(values.schemePurchaseQty);
+    // Every tier needs a positive whole purchase quantity and a bonus of
+    // zero or more, and no two may share a purchase quantity — the server
+    // could not tell which one applies.
+    const seen = new Set();
+    for (const [index, row] of values.bonusSchemes.entries()) {
+      const purchaseQty = toNumberOrNull(row.buyQty);
       if (!Number.isInteger(purchaseQty) || purchaseQty <= 0) {
-        return 'Purchase Quantity must be a positive whole number when the bonus scheme is enabled.';
+        return `Bonus scheme ${index + 1}: Buy Quantity must be a positive whole number.`;
       }
-      const bonusQty = toNumberOrNull(values.schemeBonusQty);
+      if (seen.has(purchaseQty)) {
+        return `Bonus scheme ${index + 1}: another tier already uses a Buy Quantity of ${purchaseQty}.`;
+      }
+      seen.add(purchaseQty);
+      const bonusQty = toNumberOrNull(row.bonusQty);
       if (!Number.isInteger(bonusQty) || bonusQty < 0) {
-        return 'Bonus Quantity must be zero or a positive whole number when the bonus scheme is enabled.';
+        return `Bonus scheme ${index + 1}: Bonus Quantity must be zero or a positive whole number.`;
       }
     }
 
@@ -85,9 +130,9 @@ export default function ProductForm({ initialValues, submitLabel, onSubmit, onCa
       mrp: toNumberOrNull(values.mrp),
       salePrice: toNumberOrNull(values.salePrice),
       discount: values.discount === '' ? 0 : toNumberOrNull(values.discount),
-      schemeEnabled: values.schemeEnabled,
-      schemePurchaseQty: values.schemeEnabled ? toNumberOrNull(values.schemePurchaseQty) : null,
-      schemeBonusQty: values.schemeEnabled ? toNumberOrNull(values.schemeBonusQty) : null,
+      bonusSchemes: values.bonusSchemes
+        .map((row) => ({ purchaseQty: Number(row.buyQty), bonusQty: Number(row.bonusQty) }))
+        .sort((a, b) => a.purchaseQty - b.purchaseQty),
     };
 
     setIsSubmitting(true);
@@ -100,7 +145,15 @@ export default function ProductForm({ initialValues, submitLabel, onSubmit, onCa
     }
   }
 
-  const hasSchemePreview = values.schemeEnabled && values.schemePurchaseQty !== '' && values.schemeBonusQty !== '';
+  // "10 + 1, 50 + 6" for the rows that are filled in, in the order they
+  // will apply.
+  const schemePreview = values.bonusSchemes
+    .filter((row) => row.buyQty !== '' && row.bonusQty !== '')
+    .map((row) => ({ buy: Number(row.buyQty), bonus: Number(row.bonusQty) }))
+    .filter((tier) => Number.isFinite(tier.buy) && Number.isFinite(tier.bonus))
+    .sort((a, b) => a.buy - b.buy)
+    .map((tier) => `${tier.buy} + ${tier.bonus}`)
+    .join(', ');
 
   return (
     <form className="form-card" onSubmit={handleSubmit}>
@@ -149,22 +202,23 @@ export default function ProductForm({ initialValues, submitLabel, onSubmit, onCa
         </label>
       </div>
 
-      <h3 className="form-section-title">Bonus Scheme</h3>
-      <label className="checkbox-label">
-        <input type="checkbox" checked={values.schemeEnabled} onChange={handleChange('schemeEnabled')} />
-        Enable bonus scheme
-      </label>
+      <h3 className="form-section-title">Bonus Schemes</h3>
+      <p className="form-hint">
+        Give free units when a quantity threshold is reached. Add a row per tier, e.g. 10 + 1 and 50 + 6; the
+        highest tier an order reaches is the one applied.
+      </p>
 
-      {values.schemeEnabled && (
-        <div className="form-grid">
+      {values.bonusSchemes.map((row, index) => (
+        <div key={row.key} className="scheme-row">
           <label>
-            Purchase Quantity *
+            Buy Quantity *
             <input
               type="number"
               min="1"
               step="1"
-              value={values.schemePurchaseQty}
-              onChange={handleChange('schemePurchaseQty')}
+              value={row.buyQty}
+              onChange={handleSchemeChange(row.key, 'buyQty')}
+              placeholder="e.g. 20"
               required
             />
           </label>
@@ -174,21 +228,39 @@ export default function ProductForm({ initialValues, submitLabel, onSubmit, onCa
               type="number"
               min="0"
               step="1"
-              value={values.schemeBonusQty}
-              onChange={handleChange('schemeBonusQty')}
+              value={row.bonusQty}
+              onChange={handleSchemeChange(row.key, 'bonusQty')}
+              placeholder="e.g. 2"
               required
             />
           </label>
+          <button
+            type="button"
+            className="btn-danger scheme-row-remove"
+            onClick={() => removeScheme(row.key)}
+            disabled={isSubmitting}
+            aria-label={`Remove bonus scheme ${index + 1}`}
+            title="Remove this tier">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+              <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6" />
+            </svg>
+          </button>
         </div>
+      ))}
+
+      {values.bonusSchemes.length < MAX_BONUS_SCHEMES && (
+        <button type="button" className="btn-secondary" onClick={addScheme} disabled={isSubmitting}>
+          + Add Bonus Scheme
+        </button>
       )}
 
-      {values.schemeEnabled && (
-        <p className={hasSchemePreview ? 'scheme-preview' : 'scheme-preview scheme-preview-muted'}>
-          {hasSchemePreview
-            ? `Example: buy ${values.schemePurchaseQty}, get ${values.schemeBonusQty} free — shown as "${values.schemePurchaseQty} + ${values.schemeBonusQty}".`
-            : 'Enter both quantities to see an example, e.g. 20 + 2.'}
-        </p>
-      )}
+      <p className={schemePreview ? 'scheme-preview' : 'scheme-preview scheme-preview-muted'}>
+        {values.bonusSchemes.length === 0
+          ? 'No bonus scheme. Orders for this product will not earn free units.'
+          : schemePreview
+            ? `Shown as "${schemePreview}".`
+            : 'Enter both quantities to see how the scheme will be shown, e.g. 20 + 2.'}
+      </p>
 
       <div className="form-actions">
         <button type="button" className="btn-secondary" onClick={onCancel} disabled={isSubmitting}>

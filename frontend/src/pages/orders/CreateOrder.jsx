@@ -5,7 +5,8 @@ import { listProducts } from '../../api/products.js';
 import ConfirmDialog from '../../components/ConfirmDialog.jsx';
 import CustomerPicker from './CustomerPicker.jsx';
 import ProductBrowser from './ProductBrowser.jsx';
-import { calculateLine, calculateTotals, formatMoney } from './orderCalc.js';
+import { applicableScheme, calculateLine, calculateTotals, formatMoney } from './orderCalc.js';
+import { formatScheme } from '../products/schemeFormat.js';
 
 // Mirrors the backend's own caps so the booker is told before a request is
 // wasted (the server enforces them regardless).
@@ -32,11 +33,15 @@ function parseDiscount(value) {
 //
 // Discount is deliberately NOT compared: a line's discount is now the
 // booker's to set, so a difference there is a decision, not drift.
+//
+// The snapshot holds the one tier that served the line's quantity, so that
+// is what the product's current tiers are compared against.
 function hasRepriced(item, product) {
+  const tier = applicableScheme(product, item.paidQty);
   return (
     product.salePrice !== item.rate ||
-    (product.schemeEnabled ? product.schemePurchaseQty : null) !== item.schemePurchaseQty ||
-    (product.schemeEnabled ? product.schemeBonusQty : null) !== item.schemeBonusQty
+    (tier ? tier.purchaseQty : null) !== item.schemePurchaseQty ||
+    (tier ? tier.bonusQty : null) !== item.schemeBonusQty
   );
 }
 
@@ -535,10 +540,8 @@ export default function CreateOrder() {
                         <div className="cart-line-foot">
                           {calc.bonusQty > 0 ? (
                             <span className="bonus-badge">+{calc.bonusQty} Bonus Free</span>
-                          ) : product.schemeEnabled ? (
-                            <span className="muted cart-line-scheme">
-                              {product.schemePurchaseQty}+{product.schemeBonusQty} scheme
-                            </span>
+                          ) : product.bonusSchemes.length > 0 ? (
+                            <span className="muted cart-line-scheme">{formatScheme(product)} scheme</span>
                           ) : (
                             <span />
                           )}

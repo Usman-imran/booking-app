@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import ProductForm from './ProductForm.jsx';
+import ProductForm, { newSchemeRow } from './ProductForm.jsx';
 import { getProduct, updateProduct } from '../../api/products.js';
 
 export default function EditProduct() {
@@ -61,6 +61,7 @@ export default function EditProduct() {
         <h2>Edit Product</h2>
       </div>
       <ProductForm
+        key={product.updatedAt}
         initialValues={{
           name: product.name,
           code: product.code,
@@ -70,9 +71,7 @@ export default function EditProduct() {
           mrp: String(product.mrp),
           salePrice: String(product.salePrice),
           discount: String(product.discount),
-          schemeEnabled: product.schemeEnabled,
-          schemePurchaseQty: product.schemePurchaseQty !== null ? String(product.schemePurchaseQty) : '',
-          schemeBonusQty: product.schemeBonusQty !== null ? String(product.schemeBonusQty) : '',
+          bonusSchemes: (product.bonusSchemes ?? []).map((tier) => newSchemeRow(tier)),
         }}
         submitLabel="Save Changes"
         onSubmit={handleSubmit}

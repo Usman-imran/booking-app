@@ -125,7 +125,7 @@ Migrations applied so far:
 - `pgcrypto` extension (used for UUID generation).
 - `users` table (id, name, username, password_hash, phone, is_active, created_at, updated_at — `PROJECT_SPEC.md` §2), unique username, `updated_at` auto-update trigger. See [Authentication](#authentication) for the login API built on top of it.
 - `customers` table (id, name, code, contact_person, phone, alternate_phone, address, city_area, customer_type, is_active, created_at, updated_at — `PROJECT_SPEC.md` §4), unique code, indexes on `name` and `is_active`, `updated_at` auto-update trigger.
-- `products` table (id, name, code, company, packing, unit, mrp, sale_price, discount, scheme_enabled, scheme_purchase_qty, scheme_bonus_qty, is_active, created_at, updated_at — `PROJECT_SPEC.md` §5/§7/§8), unique code, `mrp`/`sale_price` non-negative, `discount` a 0–100 percentage, and a table-level check that a product with `scheme_enabled = true` must have `scheme_purchase_qty > 0` and `scheme_bonus_qty >= 0` (both explicitly non-null — a scheme can't be "enabled" with missing quantities). Indexes on `name`, `company`, and `is_active`.
+- `products` table (id, name, code, company, packing, unit, mrp, sale_price, discount, bonus_schemes, is_active, created_at, updated_at — `PROJECT_SPEC.md` §5/§7/§8), unique code, `mrp`/`sale_price` non-negative, `discount` a 0–100 percentage. `bonus_schemes` is a JSONB array of `{purchaseQty, bonusQty}` tiers (`[]` = no scheme; migration `1790100000000_add-product-bonus-schemes` folded the former `scheme_enabled` / `scheme_purchase_qty` / `scheme_bonus_qty` columns into it); its shape is enforced by the API, which caps it at 10 tiers with unique purchase quantities. Indexes on `name`, `company`, and `is_active`.
 - `orders` table (id, order_number, customer_id, booker_id, status, remarks, subtotal, discount_total, total, submitted_at, cancelled_at, cancelled_by, created_at, updated_at — `PROJECT_SPEC.md` §10–§17). `customer_id`/`booker_id` are `NOT NULL` foreign keys (`ON DELETE RESTRICT` — a customer or booker can't be hard-deleted while referenced); indexes on both plus `status`. `order_number` is `ORD-YYYYMMDD-XXX`-formatted and unique when present. A single check constraint enforces the whole status state machine: `draft` ⇒ no `order_number` and no submitted/cancelled timestamps; `submitted` ⇒ has an `order_number` and `submitted_at`, nothing cancelled; `cancelled` ⇒ has all of `order_number`, `submitted_at`, `cancelled_at`, and `cancelled_by`. Another check keeps `total = subtotal - discount_total`.
 - `order_items` table (id, order_id, product_id, product_name, product_code, mrp, rate, discount, paid_qty, bonus_qty, scheme_purchase_qty, scheme_bonus_qty, line_subtotal, line_discount, line_total, created_at, updated_at — `PROJECT_SPEC.md` §16). `order_id` cascades on delete (so deleting a draft cleans up its items); `product_id` is `ON DELETE RESTRICT`. Every commercial column here is a **snapshot taken at order time** — changing the product's price, discount, or scheme afterward never touches existing order items (verified directly: changed a product's price/discount/scheme after creating an order item referencing it, and the item was unaffected). `line_total = line_subtotal - line_discount` is enforced by a check constraint, as is the scheme snapshot being both-or-neither (`scheme_purchase_qty`/`scheme_bonus_qty`). Written by the Order API — see [Orders API](#orders-api).
 - `order_number_counters` table (`counter_date` primary key, `last_sequence`) — one row per calendar day, backing the order numbering system below.
@@ -268,7 +268,7 @@ Under `frontend/src/pages/customers/`, all behind the existing login/`ProtectedR
 
 ## Products API
 
-All endpoints are under `/api/products` and require `Authorization: Bearer <token>`. Fields: `name`, `code` (unique), `company`, `packing`, `unit`, `mrp`, `salePrice`, `discount` (0–100, defaults to 0), `schemeEnabled`, `schemePurchaseQty`, `schemeBonusQty`, `isActive` (see `PROJECT_SPEC.md` §5/§7/§8).
+All endpoints are under `/api/products` and require `Authorization: Bearer <token>`. Fields: `name`, `code` (unique), `company`, `packing`, `unit`, `mrp`, `salePrice`, `discount` (0–100, defaults to 0), `bonusSchemes` (an array of `{ purchaseQty, bonusQty }` tiers, `[]` for no scheme), `isActive` (see `PROJECT_SPEC.md` §5/§7/§8). Every product in a response also carries `schemeEnabled` / `schemePurchaseQty` / `schemeBonusQty`, derived from its **first** tier for readers that only show one.
 
 - `POST /api/products` — create. `name`, `code`, `mrp`, and `salePrice` are required; `mrp`/`salePrice` must be non-negative numbers; `code` must be unique (`409` on conflict). Always created active.
 - `GET /api/products` — list, paginated (`page`, `limit`, default 20 / max 100), sorted by name. `search` matches `name`, `code`, or `company` (case-insensitive, partial); `isActive` (`true`/`false`) filters status. `ids` (comma-separated, 1–200) fetches exactly those products and returns the whole set rather than a page — it exists so reopening a saved draft can re-price every line in one request instead of one request per line. Inactive products are still returned by `ids`, flagged `isActive: false`, so the caller can tell the difference between "deactivated" and "gone".
@@ -330,7 +330,7 @@ Deliberately looser than the Add Product form, because a supplier's price list i
 | Product Code | optional | Generated (`PROD-0001`…) if blank | Matches the product; never changed |
 | MRP | optional | Defaults to `0` | **Blank = left alone** |
 | Discount | optional | Defaults to `0` (0–100) | **Blank = left alone** |
-| Scheme Purchase Qty | optional | Blank = no scheme; above 0 creates one | **Blank = left alone**; `0` removes the scheme |
+| Scheme Purchase Qty | optional | Blank = no scheme; above 0 creates one | **Blank = left alone**; `0` removes the scheme. A sheet describes ONE tier per product and it replaces every tier the product had — products with several tiers are best left blank here and edited in the app. |
 | Scheme Bonus Qty | optional | Defaults to `0` | Only read when a Purchase Qty is given |
 | Company, Packing, Unit | optional | Empty if blank | **Blank = left alone** |
 
@@ -357,7 +357,7 @@ from the highest `PROD-#####` already in the table, so two imports uploaded at t
 reading the same highest code; codes typed explicitly into the same file are skipped. The `UNIQUE` constraint on `code`
 remains the real guarantee — any clash rolls the whole batch back.
 
-**Bonus scheme validation**:**Bonus scheme validation**:**Bonus scheme validation**: `schemeEnabled`, `schemePurchaseQty`, and `schemeBonusQty` are treated as one unit — you can never end up with a half-set scheme. If a request enables the scheme (either explicitly, or it's already enabled and untouched), the *effective* purchase/bonus quantities (this request's values, falling back to the product's current ones on a partial update) must both be present, with `schemePurchaseQty > 0` and `schemeBonusQty >= 0` — otherwise `400`. Disabling the scheme always nulls out both quantities. A partial update that touches none of these three fields leaves the existing scheme completely alone (it's not silently rewritten).
+**Bonus scheme validation**: `bonusSchemes` is validated as a whole: at most 10 tiers, each with a whole `purchaseQty > 0` and a whole `bonusQty >= 0`, and no two tiers sharing a `purchaseQty` (the server could not tell which applies) — otherwise `400`. Tiers are stored sorted by `purchaseQty`. The older single-scheme trio (`schemeEnabled`, `schemePurchaseQty`, `schemeBonusQty`) is still accepted on input as shorthand for a zero- or one-tier list, so an older client keeps working; when both forms are sent, `bonusSchemes` wins. A partial update that mentions none of these leaves the product's tiers completely alone (they're not silently rewritten).
 
 ### Product UI
 
@@ -382,7 +382,7 @@ Under `frontend/src/pages/products/`, behind the same login/`ProtectedRoute` and
   product. A failed pass shows the same breakdown alongside a table of **Row / Column / Problem**. The product list
   behind the modal refreshes the moment anything lands.
 
-- `schemeFormat.js` — the single place that turns `{schemeEnabled, schemePurchaseQty, schemeBonusQty}` into the "20 + 2" / "No scheme" text, shared by the list and details views.
+- `schemeFormat.js` — the single place that turns a product's `bonusSchemes` into the "20 + 2" / "10 + 1, 50 + 6" / "No scheme" text (`formatScheme`), and one tier into "20 + 2" (`formatTier`), shared by the list, details and order views.
 
 ## Users API
 
@@ -520,7 +520,7 @@ For each line, taken from the product's values **at that moment** and then froze
 - `lineDiscount` = `lineSubtotal × discount%`, rounded to the nearest paisa — the discount is per product line, never
   applied globally to the order (`PROJECT_SPEC.md` §7)
 - `lineTotal` = `lineSubtotal − lineDiscount`
-- `bonusQty` = `floor(quantity ÷ schemePurchaseQty) × schemeBonusQty` when the product's scheme is enabled, else `0`
+- `bonusQty` = `floor(quantity ÷ purchaseQty) × bonusQty` for the tier that applies to the quantity — the highest of the product's `bonusSchemes` whose `purchaseQty` the quantity reaches — else `0`. With `10 + 1` and `50 + 6`, qty 49 earns 4 (via 10 + 1) and qty 50 earns 6 (via 50 + 6). The tier that applied is what the order item snapshots as `schemePurchaseQty` / `schemeBonusQty`.
   (`PROJECT_SPEC.md` §9). A `20 + 2` scheme gives 2 at qty 20, 4 at qty 40, 2 at qty 25, and 0 at qty 19. Bonus units
   have **zero sales value** — they never appear in any total.
 - The order's `subtotal`/`discountTotal`/`total` are the sums of its lines; there is no order-level discount.

@@ -4,6 +4,9 @@ import { Platform } from 'react-native';
 import apiClient from './client';
 import type { Pagination } from './orders';
 
+// One tier of a bonus scheme: "buy purchaseQty, get bonusQty free".
+export type BonusScheme = { purchaseQty: number; bonusQty: number };
+
 export type Product = {
   id: string;
   name: string;
@@ -14,6 +17,10 @@ export type Product = {
   mrp: number;
   salePrice: number;
   discount: number;
+  // Every tier, sorted by purchase quantity; [] when there is no scheme.
+  bonusSchemes: BonusScheme[];
+  // The first tier (or no scheme), derived by the server for places that
+  // only show one - prefer `bonusSchemes` for anything new.
   schemeEnabled: boolean;
   schemePurchaseQty: number | null;
   schemeBonusQty: number | null;
@@ -33,9 +40,7 @@ export type ProductInput = {
   mrp: number;
   salePrice: number;
   discount: number;
-  schemeEnabled: boolean;
-  schemePurchaseQty: number | null;
-  schemeBonusQty: number | null;
+  bonusSchemes: BonusScheme[];
 };
 
 export type ListProductsParams = {

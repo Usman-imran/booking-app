@@ -8,19 +8,21 @@ type Props = TextInputProps & {
   hint?: string;
   // Rendered inside the input on the right - "%" on a discount box, say.
   suffix?: string;
+  // Highlights the box with a red border; the form clears it as the user types.
+  error?: boolean;
 };
 
 // A labelled text input, the building block of every form. Numeric fields
 // pass keyboardType="decimal-pad" / "number-pad"; values stay strings in
 // state so a box can be empty mid-edit, exactly as on the web.
-export function Field({ label, required, hint, suffix, style, editable = true, ...rest }: Props) {
+export function Field({ label, required, hint, suffix, error, style, editable = true, ...rest }: Props) {
   return (
     <View style={styles.wrap}>
       <Text style={styles.label}>
         {label}
         {required ? <Text style={styles.required}> *</Text> : null}
       </Text>
-      <View style={[styles.inputRow, !editable && styles.inputDisabled]}>
+      <View style={[styles.inputRow, !editable && styles.inputDisabled, error && styles.inputError]}>
         <TextInput
           style={[styles.input, style]}
           placeholderTextColor={colors.textMuted}
@@ -48,6 +50,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md + 2,
   },
   inputDisabled: { backgroundColor: colors.surfaceMuted },
+  inputError: { borderColor: '#EF4444', borderWidth: 2 },
   input: { flex: 1, fontSize: 16, color: colors.text, paddingVertical: 12 },
   suffix: { color: colors.textMuted, fontSize: 15, marginLeft: spacing.sm },
   hint: { fontSize: 12, color: colors.textMuted, marginTop: 4 },

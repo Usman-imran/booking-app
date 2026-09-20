@@ -1,4 +1,4 @@
-import type { Product } from './api/products';
+import type { BonusScheme, Product } from './api/products';
 
 // Live order-line maths for the Create Order screen - a direct port of the
 // web frontend's orderCalc.js, which itself mirrors the backend's
@@ -19,30 +19,34 @@ function fromCents(cents: number) {
   return cents / CENTS;
 }
 
-type SchemeFields = Pick<Product, 'schemeEnabled' | 'schemePurchaseQty' | 'schemeBonusQty'>;
+type SchemeFields = Pick<Product, 'bonusSchemes'>;
 type PricedProduct = SchemeFields & Pick<Product, 'salePrice' | 'discount'>;
 
-// A scheme only counts if it's enabled and both quantities are usable.
-function schemeApplies(product: SchemeFields): product is SchemeFields & {
-  schemePurchaseQty: number;
-  schemeBonusQty: number;
-} {
-  return (
-    Boolean(product.schemeEnabled) &&
-    Number.isInteger(product.schemePurchaseQty) &&
-    (product.schemePurchaseQty as number) > 0 &&
-    Number.isInteger(product.schemeBonusQty) &&
-    (product.schemeBonusQty as number) >= 0
-  );
+// A tier only counts if both quantities are usable - the server never
+// stores one that isn't, so this is a guard, not the validation.
+function isUsableTier(tier: BonusScheme) {
+  return Number.isInteger(tier.purchaseQty) && tier.purchaseQty > 0 && Number.isInteger(tier.bonusQty) && tier.bonusQty >= 0;
 }
 
-// Bonus Quantity = floor(Q / P) x B. A "20 + 2" scheme gives 2 at qty 20,
-// 4 at qty 40, 2 at qty 25, 0 at qty 19. Bonus units are free.
-export function calculateBonusQty(product: SchemeFields, paidQty: number) {
-  if (!schemeApplies(product) || !Number.isInteger(paidQty) || paidQty <= 0) {
-    return 0;
+// The tier that serves a paid quantity: the highest purchase quantity the
+// order reaches, or null when none does. With 10+1 and 50+6, qty 49 is
+// served by 10+1 and qty 50 by 50+6. Mirrors the backend's bonusSchemes.js.
+export function applicableScheme(product: SchemeFields, paidQty: number): BonusScheme | null {
+  if (!Number.isInteger(paidQty) || paidQty <= 0) return null;
+  let match: BonusScheme | null = null;
+  for (const tier of [...(product.bonusSchemes ?? [])].filter(isUsableTier).sort((a, b) => a.purchaseQty - b.purchaseQty)) {
+    if (tier.purchaseQty <= paidQty) match = tier;
   }
-  return Math.floor(paidQty / product.schemePurchaseQty) * product.schemeBonusQty;
+  return match;
+}
+
+// Bonus Quantity = floor(Q / P) x B for the tier that applies to Q. A
+// "20 + 2" scheme gives 2 at qty 20, 4 at qty 40, 2 at qty 25, 0 at qty
+// 19. Bonus units are free.
+export function calculateBonusQty(product: SchemeFields, paidQty: number) {
+  const tier = applicableScheme(product, paidQty);
+  if (!tier) return 0;
+  return Math.floor(paidQty / tier.purchaseQty) * tier.bonusQty;
 }
 
 export type LineCalc = {
@@ -120,8 +124,13 @@ export function calculateTotals(lines: LineCalc[]): OrderTotals {
   };
 }
 
-// "20 + 2" - the way a scheme is written everywhere in the app.
+// "20 + 2" - the way a tier is written everywhere in the app.
+export function formatTier(tier: BonusScheme) {
+  return `${tier.purchaseQty} + ${tier.bonusQty}`;
+}
+
+// Every tier of a product on one line: "10 + 1, 50 + 6", or "No scheme".
 export function formatScheme(product: SchemeFields) {
-  if (!product.schemeEnabled) return 'No scheme';
-  return `${product.schemePurchaseQty} + ${product.schemeBonusQty}`;
+  if (!product.bonusSchemes?.length) return 'No scheme';
+  return product.bonusSchemes.map(formatTier).join(', ');
 }

@@ -8,7 +8,7 @@ import { ErrorState } from '@/components/ErrorState';
 import { Banner } from '@/components/form/Banner';
 import { Button } from '@/components/form/Button';
 import { deactivateProduct, getProduct, updateProduct, type Product } from '@/lib/api/products';
-import { formatScheme } from '@/lib/orderCalc';
+import { formatScheme, formatTier } from '@/lib/orderCalc';
 import { colors, formatDate, formatMoney, radius, spacing } from '@/lib/theme';
 
 // Mirrors the web's ProductDetails: identity, pricing, bonus scheme, Edit,
@@ -112,7 +112,9 @@ export function ProductDetailsScreen({ id }: { id: string }) {
           <Text style={[styles.statusPill, product.isActive ? styles.statusActive : styles.statusInactive]}>
             {product.isActive ? 'Active' : 'Inactive'}
           </Text>
-          {product.schemeEnabled ? <Text style={[styles.statusPill, styles.statusScheme]}>{formatScheme(product)}</Text> : null}
+          {product.bonusSchemes.length > 0 ? (
+            <Text style={[styles.statusPill, styles.statusScheme]}>{formatScheme(product)}</Text>
+          ) : null}
         </View>
       </View>
 
@@ -143,14 +145,14 @@ export function ProductDetailsScreen({ id }: { id: string }) {
         ]}
       />
 
-      {product.schemeEnabled ? (
+      {product.bonusSchemes.length > 0 ? (
         <DetailCard
-          title="Bonus Scheme"
-          items={[
-            { label: 'Scheme', value: formatScheme(product), highlight: true },
-            { label: 'Purchase Quantity', value: product.schemePurchaseQty },
-            { label: 'Bonus Quantity', value: product.schemeBonusQty },
-          ]}
+          title={product.bonusSchemes.length === 1 ? 'Bonus Scheme' : 'Bonus Schemes'}
+          items={product.bonusSchemes.map((tier, index) => ({
+            label: product.bonusSchemes.length === 1 ? 'Scheme' : `Tier ${index + 1}`,
+            value: `Buy ${tier.purchaseQty}, get ${tier.bonusQty} free (${formatTier(tier)})`,
+            highlight: true,
+          }))}
         />
       ) : (
         <DetailCard title="Bonus Scheme" items={[{ label: 'Status', value: 'No bonus scheme configured' }]} />

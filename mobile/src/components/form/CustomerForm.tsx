@@ -1,7 +1,6 @@
 import { useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Alert, StyleSheet, Text, View } from 'react-native';
 
-import { Banner } from './Banner';
 import { Button } from './Button';
 import { Field } from './Field';
 import { FormScreen } from './FormScreen';
@@ -38,34 +37,41 @@ type Props = {
   onCancel: () => void;
 };
 
+type FieldErrors = Partial<Record<keyof CustomerInput, boolean>>;
+
 // The mobile counterpart of the web's CustomerForm, shared by Add and Edit:
 // the same fields, the same "name and code are required" rule, the same
-// body. Blank optional fields are sent as '' and stored as null.
+// body. Blank optional fields are sent as '' and stored as null. A missing
+// required field is flagged with a red border rather than a banner.
 export function CustomerForm({ initialValues, submitLabel, onSubmit, onCancel }: Props) {
   const [values, setValues] = useState<CustomerInput>({ ...EMPTY_CUSTOMER_FORM, ...initialValues });
-  const [error, setError] = useState<string | null>(null);
+  const [errors, setErrors] = useState<FieldErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   function set(field: keyof CustomerInput) {
     return (text: string) => {
-      setError(null);
+      setErrors((current) => (current[field] ? { ...current, [field]: false } : current));
       setValues((current) => ({ ...current, [field]: text }));
     };
   }
 
-  async function handleSubmit() {
-    setError(null);
+  function validate(): FieldErrors {
+    const problems: FieldErrors = {};
+    if (!values.name.trim()) problems.name = true;
+    if (!values.code.trim()) problems.code = true;
+    return problems;
+  }
 
-    if (!values.name.trim() || !values.code.trim()) {
-      setError('Customer name and code are required.');
-      return;
-    }
+  async function handleSubmit() {
+    const problems = validate();
+    setErrors(problems);
+    if (Object.keys(problems).length > 0) return;
 
     setIsSubmitting(true);
     try {
       await onSubmit(values);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong.');
+      Alert.alert('Could not save customer', err instanceof Error ? err.message : 'Something went wrong.');
     } finally {
       setIsSubmitting(false);
     }
@@ -73,13 +79,12 @@ export function CustomerForm({ initialValues, submitLabel, onSubmit, onCancel }:
 
   return (
     <FormScreen>
-      {error ? <Banner kind="error">{error}</Banner> : null}
-
       <Field
         label="Customer Name"
         required
         value={values.name}
         onChangeText={set('name')}
+        error={errors.name}
         maxLength={LIMITS.name}
         autoCapitalize="words"
       />
@@ -88,6 +93,7 @@ export function CustomerForm({ initialValues, submitLabel, onSubmit, onCancel }:
         required
         value={values.code}
         onChangeText={set('code')}
+        error={errors.code}
         maxLength={LIMITS.code}
         autoCapitalize="characters"
         autoCorrect={false}

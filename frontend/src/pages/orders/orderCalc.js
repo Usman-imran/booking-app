@@ -22,25 +22,34 @@ function fromCents(cents) {
   return cents / CENTS;
 }
 
-// A scheme only counts if it's enabled and both quantities are usable.
-function schemeApplies(product) {
+// A tier only counts if both quantities are usable — the server never
+// stores one that isn't, so this is a guard, not the validation.
+function isUsableTier(tier) {
   return (
-    Boolean(product.schemeEnabled) &&
-    Number.isInteger(product.schemePurchaseQty) &&
-    product.schemePurchaseQty > 0 &&
-    Number.isInteger(product.schemeBonusQty) &&
-    product.schemeBonusQty >= 0
+    Number.isInteger(tier.purchaseQty) && tier.purchaseQty > 0 && Number.isInteger(tier.bonusQty) && tier.bonusQty >= 0
   );
 }
 
-// PROJECT_SPEC.md §9: Bonus Quantity = floor(Q / P) x B.
-// A "20 + 2" scheme gives 2 at qty 20, 4 at qty 40, 2 at qty 25, 0 at qty 19.
-// Bonus units are free — they never carry sales value.
-export function calculateBonusQty(product, paidQty) {
-  if (!schemeApplies(product) || !Number.isInteger(paidQty) || paidQty <= 0) {
-    return 0;
+// The tier that serves a paid quantity: the highest purchase quantity the
+// order reaches, or null when none does. With 10+1 and 50+6, qty 49 is
+// served by 10+1 and qty 50 by 50+6. Mirrors the backend's bonusSchemes.js.
+export function applicableScheme(product, paidQty) {
+  if (!Number.isInteger(paidQty) || paidQty <= 0) return null;
+  const tiers = [...(product.bonusSchemes ?? [])].filter(isUsableTier).sort((a, b) => a.purchaseQty - b.purchaseQty);
+  let match = null;
+  for (const tier of tiers) {
+    if (tier.purchaseQty <= paidQty) match = tier;
   }
-  return Math.floor(paidQty / product.schemePurchaseQty) * product.schemeBonusQty;
+  return match;
+}
+
+// PROJECT_SPEC.md §9: Bonus Quantity = floor(Q / P) x B, for the tier that
+// applies to Q. A "20 + 2" scheme gives 2 at qty 20, 4 at qty 40, 2 at qty
+// 25, 0 at qty 19. Bonus units are free — they never carry sales value.
+export function calculateBonusQty(product, paidQty) {
+  const tier = applicableScheme(product, paidQty);
+  if (!tier) return 0;
+  return Math.floor(paidQty / tier.purchaseQty) * tier.bonusQty;
 }
 
 // One order line at the product's current price and discount. `paidQty` of
