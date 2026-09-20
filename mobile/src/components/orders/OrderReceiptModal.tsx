@@ -77,8 +77,11 @@ export function OrderReceiptModal({ visible, onClose, order: providedOrder, orde
   }
 
   const receipt = useMemo(
-    () => (order ? buildReceipt(order, { companyName: user?.companyName, bookerName: user?.name }) : null),
-    [order, user?.companyName, user?.name]
+    () =>
+      order
+        ? buildReceipt(order, { companyName: user?.companyName, tagline: user?.tagline, bookerName: user?.name })
+        : null,
+    [order, user?.companyName, user?.tagline, user?.name]
   );
 
   // Mounts the renderer and waits for its one reply.

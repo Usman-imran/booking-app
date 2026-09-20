@@ -6,11 +6,12 @@ import { Banner } from '@/components/form/Banner';
 import { Button } from '@/components/form/Button';
 import { Field } from '@/components/form/Field';
 import { FormScreen } from '@/components/form/FormScreen';
-import { updateCompanyName } from '@/lib/api/auth';
+import { updateCompanyProfile } from '@/lib/api/auth';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { cardShadow, colors, radius, spacing } from '@/lib/theme';
 
 const COMPANY_NAME_MAX = 150;
+const TAGLINE_MAX = 150;
 
 // Application-level settings. Deliberately minimal, as on the web: the one
 // thing that genuinely is application-level is what the business is called.
@@ -19,19 +20,23 @@ export function SettingsScreen() {
   const { user, refreshUser } = useAuth();
 
   const [companyName, setCompanyName] = useState(user?.companyName ?? '');
+  const [tagline, setTagline] = useState(user?.tagline ?? '');
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  // Re-seeded if the session's name changes underneath.
+  // Re-seeded if the session's values change underneath.
   const sessionName = user?.companyName ?? '';
+  const sessionTagline = user?.tagline ?? '';
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setCompanyName(sessionName);
-  }, [sessionName]);
+    setTagline(sessionTagline);
+  }, [sessionName, sessionTagline]);
 
   const trimmed = companyName.trim();
-  const isUnchanged = trimmed === sessionName;
+  const trimmedTagline = tagline.trim();
+  const isUnchanged = trimmed === sessionName && trimmedTagline === sessionTagline;
 
   async function handleSave() {
     setError(null);
@@ -44,7 +49,7 @@ export function SettingsScreen() {
 
     setIsSaving(true);
     try {
-      await updateCompanyName(trimmed);
+      await updateCompanyProfile({ companyName: trimmed, tagline: trimmedTagline || null });
       // Refreshes the session so every screen picks the new name up at once.
       await refreshUser();
       setSuccess('Saved.');
@@ -78,9 +83,21 @@ export function SettingsScreen() {
           editable={!isSaving}
           autoCapitalize="words"
         />
+        <Field
+          label="Tagline"
+          value={tagline}
+          onChangeText={(text) => {
+            setTagline(text);
+            setSuccess(null);
+          }}
+          maxLength={TAGLINE_MAX}
+          placeholder="e.g. Medicine Distribution"
+          editable={!isSaving}
+          hint="Printed under the company name on receipts. Leave blank for the default."
+        />
         <Text style={styles.note}>
-          This is the name shown on the dashboard and printed at the top of every order receipt. It applies to your
-          account only.
+          The name is shown on the dashboard and, with the tagline, printed at the top of every order receipt. Both
+          apply to your account only.
         </Text>
         <Text style={styles.note}>
           Receipts are generated from the current name each time they are exported, so re-exporting an older order
@@ -88,7 +105,7 @@ export function SettingsScreen() {
           affected.
         </Text>
         <Button
-          title="Save Company Name"
+          title="Save Company Details"
           onPress={handleSave}
           loading={isSaving}
           disabled={isSaving || isUnchanged || !trimmed}

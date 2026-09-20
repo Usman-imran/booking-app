@@ -21,6 +21,7 @@ const MIN_PASSWORD_LENGTH = 8;
 
 const EMPTY_FORM = {
   companyName: '',
+  tagline: '',
   name: '',
   username: '',
   password: '',
@@ -68,6 +69,7 @@ export default function SignUp() {
         username: values.username.trim(),
         password: values.password,
         companyName: values.companyName.trim(),
+        tagline: values.tagline.trim() || undefined,
         phone: values.phone.trim() || undefined,
       });
 
@@ -104,6 +106,16 @@ export default function SignUp() {
           onChangeText={handleChange('companyName')}
           placeholder="e.g. Al-Noor Distributors"
         />
+
+        <Text style={styles.label}>Company tagline (optional)</Text>
+        <TextInput
+          style={styles.input}
+          value={values.tagline}
+          onChangeText={handleChange('tagline')}
+          placeholder="e.g. Medicine Distribution"
+          maxLength={150}
+        />
+        <Text style={styles.fieldHint}>Printed under your company name on every order receipt.</Text>
 
         <Text style={styles.label}>Full name</Text>
         <TextInput style={styles.input} value={values.name} onChangeText={handleChange('name')} />
@@ -208,6 +220,7 @@ const styles = StyleSheet.create({
   passwordInput: { flex: 1, paddingRight: 48 },
   eyeButton: { position: 'absolute', right: 0, height: '100%', justifyContent: 'center', paddingHorizontal: 12 },
   note: { fontSize: 12, color: '#5b6472', marginTop: 14 },
+  fieldHint: { fontSize: 12, color: '#5b6472', marginTop: 6 },
   button: {
     backgroundColor: '#208AEF',
     borderRadius: 10,

@@ -5,33 +5,73 @@ import { RECEIPT_COLORS as C, type Receipt, type ReceiptLine } from '@/lib/recei
 import { formatMoney } from '@/lib/theme';
 
 // The on-screen preview of the receipt: the HTML template's colours, sizes
-// and spacing (index.css's `.receipt-*` rules) as native views, laid out at
-// the web's fixed 760px. The JPG and PDF themselves are rendered from the
-// HTML template (receiptHtml.ts), not from this view - this exists so the
-// booker sees the invoice before choosing how to send it.
+// and spacing (receiptHtml.ts's STYLES) as native views, laid out at the
+// fixed 760px the JPG uses. The JPG and PDF themselves are rendered from
+// the HTML template, not from this view - this exists so the booker sees
+// the invoice before choosing how to send it, so it mirrors the template's
+// compact 25-lines-per-page sizing.
 export const RECEIPT_WIDTH = 760;
 
-// Column widths: the template's 35 / 12 / 12 / 10 / 11 / 20 % of the content
-// width between the 28pt gutters, so the preview's columns sit where the
-// exported invoice's do. Everything except the product name is
+// Column widths: the template's 9 / 41 / 7 / 8 / 9 / 11 / 15 % (S.NO,
+// product, qty, bonus, discount, rate, line total), so the preview's
+// columns sit where the exported invoice's do. The S.NO column includes
+// the page gutter, as in the template. Everything numeric is
 // right-aligned, the way money reads.
-const CONTENT_WIDTH = RECEIPT_WIDTH - 2 * 16;
 const COLUMNS = {
-  name: Math.round(CONTENT_WIDTH * 0.35),
-  rate: Math.round(CONTENT_WIDTH * 0.12),
-  paidQty: Math.round(CONTENT_WIDTH * 0.12),
-  bonus: Math.round(CONTENT_WIDTH * 0.1),
-  discount: Math.round(CONTENT_WIDTH * 0.11),
-  lineTotal: Math.round(CONTENT_WIDTH * 0.2),
+  serial: Math.round(RECEIPT_WIDTH * 0.09),
+  name: Math.round(RECEIPT_WIDTH * 0.41),
+  paidQty: Math.round(RECEIPT_WIDTH * 0.07),
+  bonus: Math.round(RECEIPT_WIDTH * 0.08),
+  discount: Math.round(RECEIPT_WIDTH * 0.09),
+  rate: Math.round(RECEIPT_WIDTH * 0.11),
+  lineTotal: Math.round(RECEIPT_WIDTH * 0.15),
 } as const;
 
-function Cell({ width, right, children }: { width: number; right?: boolean; children: React.ReactNode }) {
-  return <View style={[styles.cell, { width }, right && styles.cellRight]}>{children}</View>;
+type Align = 'left' | 'right' | 'center';
+
+function Cell({
+  width,
+  align = 'left',
+  first,
+  last,
+  children,
+}: {
+  width: number;
+  align?: Align;
+  first?: boolean;
+  last?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <View
+      style={[
+        styles.cell,
+        { width },
+        align === 'right' && styles.cellRight,
+        align === 'center' && styles.cellCenter,
+        first && styles.cellFirst,
+        last && styles.cellLast,
+      ]}>
+      {children}
+    </View>
+  );
 }
 
-function HeaderCell({ width, right, label }: { width: number; right?: boolean; label: string }) {
+function HeaderCell({
+  width,
+  align,
+  first,
+  last,
+  label,
+}: {
+  width: number;
+  align?: Align;
+  first?: boolean;
+  last?: boolean;
+  label: string;
+}) {
   return (
-    <Cell width={width} right={right}>
+    <Cell width={width} align={align} first={first} last={last}>
       <Text style={styles.th}>{label}</Text>
     </Cell>
   );
@@ -40,17 +80,21 @@ function HeaderCell({ width, right, label }: { width: number; right?: boolean; l
 function LineRow({ line, index }: { line: ReceiptLine; index: number }) {
   return (
     <View style={[styles.tr, index % 2 === 1 && styles.trZebra]}>
+      <Cell width={COLUMNS.serial} align="center" first>
+        <Text style={[styles.num, styles.serial]}>{line.serial}</Text>
+      </Cell>
       <Cell width={COLUMNS.name}>
-        <Text style={styles.product}>{line.name}</Text>
-        {line.code ? <Text style={styles.code}>{line.code}</Text> : null}
+        {/* Name and code on one line, so a row stays one line tall unless
+            the name itself wraps - the same rule as the template. */}
+        <Text style={styles.product}>
+          {line.name}
+          {line.code ? <Text style={styles.code}>{`  ${line.code}`}</Text> : null}
+        </Text>
       </Cell>
-      <Cell width={COLUMNS.rate} right>
-        <Text style={styles.num}>{formatMoney(line.rate)}</Text>
-      </Cell>
-      <Cell width={COLUMNS.paidQty} right>
+      <Cell width={COLUMNS.paidQty} align="right">
         <Text style={styles.num}>{line.paidQty}</Text>
       </Cell>
-      <Cell width={COLUMNS.bonus} right>
+      <Cell width={COLUMNS.bonus} align="right">
         {/* Bonus is free stock, so it is a coloured chip rather than
             another number that looks paid for. */}
         {line.bonusQty > 0 ? (
@@ -59,12 +103,15 @@ function LineRow({ line, index }: { line: ReceiptLine; index: number }) {
           <Text style={[styles.num, styles.dash]}>—</Text>
         )}
       </Cell>
-      <Cell width={COLUMNS.discount} right>
+      <Cell width={COLUMNS.discount} align="right">
         <Text style={[styles.num, line.discount <= 0 && styles.dash]}>
           {line.discount > 0 ? `${formatMoney(line.discount)}%` : '—'}
         </Text>
       </Cell>
-      <Cell width={COLUMNS.lineTotal} right>
+      <Cell width={COLUMNS.rate} align="right">
+        <Text style={styles.num}>{formatMoney(line.rate)}</Text>
+      </Cell>
+      <Cell width={COLUMNS.lineTotal} align="right" last>
         <Text style={[styles.num, styles.lineTotal]}>{formatMoney(line.lineTotal)}</Text>
       </Cell>
     </View>
@@ -100,18 +147,23 @@ export function ReceiptView({
         </View>
         <View style={styles.headerRight}>
           <Text style={styles.number}>{receipt.orderNumber || 'DRAFT'}</Text>
-          <Text style={styles.date}>{receipt.dateLabel}</Text>
-          <Text style={[styles.status, isCancelled ? styles.statusCancelled : styles.statusSubmitted]}>
-            {receipt.statusLabel.toUpperCase()}
-          </Text>
+          {/* Date and status share a line to keep the header short. */}
+          <View style={styles.dateRow}>
+            <Text style={styles.date}>{receipt.dateLabel}</Text>
+            <Text style={[styles.status, isCancelled ? styles.statusCancelled : styles.statusSubmitted]}>
+              {receipt.statusLabel.toUpperCase()}
+            </Text>
+          </View>
         </View>
       </View>
 
       <View style={styles.parties}>
         <View style={styles.party}>
           <Text style={styles.partyLabel}>BILL TO</Text>
-          <Text style={styles.partyName}>{customer.name}</Text>
-          {customer.code ? <Text style={styles.partyLine}>{customer.code}</Text> : null}
+          <Text style={styles.partyName}>
+            {customer.name}
+            {customer.code ? <Text style={styles.partyCode}>{`  ${customer.code}`}</Text> : null}
+          </Text>
           {customer.address ? <Text style={styles.partyLine}>{customer.address}</Text> : null}
           {customer.phone ? <Text style={styles.partyLine}>{customer.phone}</Text> : null}
         </View>
@@ -122,12 +174,13 @@ export function ReceiptView({
       </View>
 
       <View style={styles.thead}>
-        <HeaderCell width={COLUMNS.name} label="Product" />
-        <HeaderCell width={COLUMNS.rate} label="Rate" right />
-        <HeaderCell width={COLUMNS.paidQty} label="Paid Qty" right />
-        <HeaderCell width={COLUMNS.bonus} label="Bonus" right />
-        <HeaderCell width={COLUMNS.discount} label="Disc %" right />
-        <HeaderCell width={COLUMNS.lineTotal} label="Line Total" right />
+        <HeaderCell width={COLUMNS.serial} label="S.NO" align="center" first />
+        <HeaderCell width={COLUMNS.name} label="Product Name" />
+        <HeaderCell width={COLUMNS.paidQty} label="Qty" align="right" />
+        <HeaderCell width={COLUMNS.bonus} label="Bonus" align="right" />
+        <HeaderCell width={COLUMNS.discount} label="Disc %" align="right" />
+        <HeaderCell width={COLUMNS.rate} label="Rate" align="right" />
+        <HeaderCell width={COLUMNS.lineTotal} label="Line Total" align="right" last />
       </View>
       {receipt.lines.map((line, index) => (
         <LineRow key={line.id} line={line} index={index} />
@@ -208,26 +261,28 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     justifyContent: 'space-between',
     backgroundColor: C.navy,
-    paddingVertical: 22,
-    paddingHorizontal: 28,
+    paddingVertical: 12,
+    paddingHorizontal: 22,
   },
   brand: {
-    fontSize: 22,
+    fontSize: 18,
     fontWeight: '700',
     color: C.white,
     letterSpacing: 0.2,
+    lineHeight: 22,
   },
-  tagline: { fontSize: 12, color: C.headerMuted, marginTop: 2 },
+  tagline: { fontSize: 10.5, color: C.headerMuted, marginTop: 2, lineHeight: 13 },
   headerRight: { alignItems: 'flex-end' },
-  number: { fontSize: 17, fontWeight: '700', color: C.white },
-  date: { fontSize: 12, color: C.headerMuted, marginTop: 2 },
+  number: { fontSize: 14, fontWeight: '700', color: C.white, lineHeight: 17 },
+  dateRow: { flexDirection: 'row', alignItems: 'center', marginTop: 3, gap: 8 },
+  date: { fontSize: 10.5, color: C.headerMuted, lineHeight: 13 },
   status: {
-    marginTop: 8,
-    paddingVertical: 3,
-    paddingHorizontal: 10,
+    paddingVertical: 2,
+    paddingHorizontal: 8,
     borderRadius: 999,
     overflow: 'hidden',
-    fontSize: 10,
+    fontSize: 8.5,
+    lineHeight: 11,
     fontWeight: '700',
     letterSpacing: 0.4,
     color: C.white,
@@ -237,109 +292,114 @@ const styles = StyleSheet.create({
 
   parties: {
     flexDirection: 'row',
-    paddingTop: 20,
-    paddingHorizontal: 28,
-    paddingBottom: 16,
+    paddingTop: 8,
+    paddingHorizontal: 22,
+    paddingBottom: 6,
   },
-  party: { width: '50%', paddingRight: 20 },
+  party: { width: '50%', paddingRight: 16 },
   partyLabel: {
-    fontSize: 10,
+    fontSize: 8.5,
     fontWeight: '700',
-    letterSpacing: 0.6,
+    letterSpacing: 0.5,
     color: C.muted,
-    marginBottom: 4,
+    marginBottom: 2,
+    lineHeight: 10,
   },
-  partyName: { fontSize: 15, fontWeight: '700', color: C.navy, lineHeight: 22 },
-  partyLine: { fontSize: 12, color: C.muted, lineHeight: 17 },
+  partyName: { fontSize: 12.5, fontWeight: '700', color: C.navy, lineHeight: 15 },
+  partyCode: { fontSize: 9.5, fontWeight: '400', color: C.muted },
+  partyLine: { fontSize: 10, color: C.muted, lineHeight: 12 },
 
   thead: {
     flexDirection: 'row',
     backgroundColor: C.navyAccent,
-    paddingHorizontal: 16,
   },
-  th: { fontSize: 11, fontWeight: '700', letterSpacing: 0.3, color: C.white },
+  th: { fontSize: 9.5, fontWeight: '700', letterSpacing: 0.3, color: C.white, lineHeight: 11 },
   tr: {
     flexDirection: 'row',
-    paddingHorizontal: 16,
     borderBottomWidth: 1,
     borderBottomColor: C.hairline,
   },
   trZebra: { backgroundColor: C.zebra },
   cell: {
-    paddingVertical: 10,
-    paddingHorizontal: 12,
+    paddingVertical: 2,
+    paddingHorizontal: 7,
     justifyContent: 'flex-start',
   },
   cellRight: { alignItems: 'flex-end' },
-  product: { fontSize: 13, fontWeight: '600', color: C.navy, lineHeight: 19 },
-  code: { fontSize: 11, color: C.muted, lineHeight: 16 },
+  cellCenter: { alignItems: 'center' },
+  // The outer columns carry the page gutter, as in the template.
+  cellFirst: { paddingLeft: 22 },
+  cellLast: { paddingRight: 22 },
+  serial: { color: C.muted },
+  product: { fontSize: 10.5, fontWeight: '600', color: C.navy, lineHeight: 13 },
+  code: { fontSize: 9, fontWeight: '400', color: C.muted },
   num: {
-    fontSize: 13,
+    fontSize: 10.5,
     color: C.charcoal,
-    lineHeight: 19,
+    lineHeight: 13,
     fontVariant: ['tabular-nums'],
   },
   dash: { color: C.muted },
   lineTotal: { fontWeight: '700', color: C.navy },
   bonus: {
-    paddingVertical: 1,
-    paddingHorizontal: 7,
+    paddingHorizontal: 6,
     borderRadius: 999,
     overflow: 'hidden',
     backgroundColor: C.bonusFill,
     color: C.bonusText,
     fontWeight: '700',
-    fontSize: 12,
-    lineHeight: 17,
+    fontSize: 9.5,
+    lineHeight: 13,
   },
 
   footer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingTop: 18,
-    paddingHorizontal: 28,
-    paddingBottom: 26,
+    paddingTop: 10,
+    paddingHorizontal: 22,
+    paddingBottom: 14,
   },
-  remarks: { width: '55%', paddingRight: 24 },
-  remarksText: { fontSize: 12, color: C.charcoal, lineHeight: 17 },
-  note: { marginTop: 10, fontSize: 11, color: C.muted, lineHeight: 16 },
+  remarks: { width: '55%', paddingRight: 20 },
+  remarksText: { fontSize: 10.5, color: C.charcoal, lineHeight: 13 },
+  note: { marginTop: 6, fontSize: 9.5, color: C.muted, lineHeight: 12 },
   cancelledNote: {
-    marginTop: 10,
-    fontSize: 12,
+    marginTop: 6,
+    fontSize: 10.5,
     fontWeight: '700',
     color: C.cancelled,
-    lineHeight: 17,
+    lineHeight: 13,
   },
-  totals: { width: '45%', maxWidth: 300 },
+  totals: { width: '45%', maxWidth: 260 },
   totalRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: 3,
+    paddingVertical: 1.5,
   },
-  totalLabel: { fontSize: 12, color: C.muted },
+  totalLabel: { fontSize: 10.5, color: C.muted, lineHeight: 13 },
   totalValue: {
-    fontSize: 12,
+    fontSize: 10.5,
     fontWeight: '700',
     color: C.charcoal,
+    lineHeight: 13,
     fontVariant: ['tabular-nums'],
   },
   grandTotal: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 10,
-    paddingVertical: 11,
-    paddingHorizontal: 14,
+    marginTop: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
     backgroundColor: C.navy,
   },
   grandTotalLabel: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '700',
     letterSpacing: 0.4,
     color: C.white,
   },
   grandTotalValue: {
-    fontSize: 18,
+    fontSize: 15,
     fontWeight: '700',
     color: C.white,
     fontVariant: ['tabular-nums'],

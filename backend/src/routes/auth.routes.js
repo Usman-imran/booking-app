@@ -2,13 +2,13 @@ import { Router } from 'express';
 import asyncHandler from '../utils/asyncHandler.js';
 import ApiError from '../utils/ApiError.js';
 import authenticate from '../middleware/authenticate.js';
-import { createUser, findUserByUsername, setCompanyName, toPublicUser } from '../models/user.js';
+import { createUser, findUserByUsername, setCompanyProfile, toPublicUser } from '../models/user.js';
 import { hashPassword, verifyPassword } from '../utils/password.js';
 import { signAuthToken } from '../utils/jwt.js';
 
 const router = Router();
 
-const FIELD_LIMITS = { name: 150, username: 50, companyName: 150, phone: 20 };
+const FIELD_LIMITS = { name: 150, username: 50, companyName: 150, tagline: 150, phone: 20 };
 const MIN_PASSWORD_LENGTH = 8;
 
 function readRequiredString(body, field, errors) {
@@ -25,12 +25,29 @@ function readRequiredString(body, field, errors) {
   return trimmed;
 }
 
+// An optional short text field: absent, null or blank all mean "none"
+// (returned as null); otherwise it is trimmed and length-checked.
+function readOptionalString(body, field, errors) {
+  const value = body[field];
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value !== 'string') {
+    errors.push(`${field} must be a string.`);
+    return null;
+  }
+  const trimmed = value.trim();
+  if (trimmed.length > FIELD_LIMITS[field]) {
+    errors.push(`${field} must be at most ${FIELD_LIMITS[field]} characters.`);
+    return null;
+  }
+  return trimmed || null;
+}
+
 // Registration is open: anyone who reaches the app can create an account
 // and is signed straight in. Each account is its own isolated workspace —
 // its customers, products, orders and targets are visible to it alone.
 //
 // POST /api/auth/register
-// Body: { name, username, password, companyName, phone? }
+// Body: { name, username, password, companyName, tagline?, phone? }
 router.post(
   '/register',
   asyncHandler(async (req, res) => {
@@ -42,20 +59,15 @@ router.post(
     // Required, per the branding it drives: an account with no company name
     // would print a generic receipt.
     const companyName = readRequiredString(body, 'companyName', errors);
+    // Optional: the line under the company name on receipts.
+    const tagline = readOptionalString(body, 'tagline', errors);
 
     const password = body.password;
     if (typeof password !== 'string' || password.length < MIN_PASSWORD_LENGTH) {
       errors.push(`password is required and must be at least ${MIN_PASSWORD_LENGTH} characters.`);
     }
 
-    let phone = null;
-    if (body.phone !== undefined && body.phone !== null && body.phone !== '') {
-      if (typeof body.phone !== 'string' || body.phone.trim().length > FIELD_LIMITS.phone) {
-        errors.push(`phone must be a string of at most ${FIELD_LIMITS.phone} characters.`);
-      } else {
-        phone = body.phone.trim();
-      }
-    }
+    const phone = readOptionalString(body, 'phone', errors);
 
     if (errors.length > 0) {
       throw new ApiError(400, errors[0], errors);
@@ -73,6 +85,7 @@ router.post(
         passwordHash: await hashPassword(password),
         phone,
         companyName,
+        tagline,
       });
     } catch (err) {
       // Lost a race with a concurrent registration for the same username.
@@ -121,7 +134,9 @@ router.get('/me', authenticate, (req, res) => {
   res.json({ user: toPublicUser(req.user) });
 });
 
-// PUT /api/auth/company — rename the business.
+// PUT /api/auth/company — rename the business and/or set its tagline.
+// Body: { companyName, tagline? } — a missing, null or blank tagline clears
+// it, so the receipt goes back to its default line.
 //
 // An application-level setting (PROJECT_SPEC.md §24), not a business record:
 // it changes what the app calls itself in the sidebar and at the top of
@@ -148,9 +163,15 @@ router.put(
       throw new ApiError(400, `companyName must be at most ${FIELD_LIMITS.companyName} characters.`);
     }
 
+    const errors = [];
+    const tagline = readOptionalString(req.body ?? {}, 'tagline', errors);
+    if (errors.length > 0) {
+      throw new ApiError(400, errors[0], errors);
+    }
+
     // RETURNING gives back what is actually stored, rather than patching
     // the cached request user.
-    const user = await setCompanyName(req.user.id, companyName);
+    const user = await setCompanyProfile(req.user.id, { companyName, tagline });
     res.json({ user: toPublicUser(user) });
   })
 );

@@ -12,7 +12,8 @@ import type { OrderDetail } from '@/lib/api/orders';
 // the field existed, mainly. A receipt still has to have a heading, and a
 // neutral description beats an empty banner or a product name.
 export const FALLBACK_BRAND_NAME = 'Medicine Distribution';
-export const BRAND_TAGLINE = 'Medicine Distribution';
+// The line under the heading when the account has not set its own tagline.
+export const DEFAULT_BRAND_TAGLINE = 'Medicine Distribution';
 
 // The palette the receipt is drawn in, identical to the web's so a receipt
 // shared from the phone matches one shared from the browser.
@@ -33,6 +34,8 @@ export const RECEIPT_COLORS = {
 
 export type ReceiptLine = {
   id: string;
+  // 1-based position in the order, the S.NO column.
+  serial: number;
   name: string;
   code: string;
   rate: number;
@@ -82,10 +85,15 @@ function formatDateTime(value: string | null | undefined) {
 // that order was actually placed at (PROJECT_SPEC.md §16).
 export function buildReceipt(
   order: OrderDetail,
-  { companyName, bookerName }: { companyName?: string | null; bookerName?: string | null } = {}
+  {
+    companyName,
+    tagline,
+    bookerName,
+  }: { companyName?: string | null; tagline?: string | null; bookerName?: string | null } = {}
 ): Receipt {
-  const lines: ReceiptLine[] = order.items.map((item) => ({
+  const lines: ReceiptLine[] = order.items.map((item, index) => ({
     id: item.id,
+    serial: index + 1,
     name: item.productName,
     code: item.productCode,
     rate: item.rate,
@@ -100,11 +108,14 @@ export function buildReceipt(
   // blank-but-present name is treated as missing, so a whitespace value
   // can't produce an empty banner.
   const brandName = String(companyName ?? '').trim() || FALLBACK_BRAND_NAME;
+  // The account's own tagline, entered at sign-up or in Settings; the
+  // default when there isn't one. Either way it is dropped when it would
+  // just repeat the heading.
+  const brandTagline = String(tagline ?? '').trim() || DEFAULT_BRAND_TAGLINE;
 
   return {
     brandName,
-    // The strapline is dropped when it would just repeat the heading.
-    brandTagline: brandName === BRAND_TAGLINE ? '' : BRAND_TAGLINE,
+    brandTagline: brandTagline.toLowerCase() === brandName.toLowerCase() ? '' : brandTagline,
     orderNumber: order.orderNumber,
     status: order.status,
     statusLabel: order.status === 'submitted' ? 'Submitted' : order.status === 'cancelled' ? 'Cancelled' : 'Draft',

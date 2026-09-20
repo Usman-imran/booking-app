@@ -4,10 +4,12 @@ import { RECEIPT_COLORS as C, type Receipt } from './receiptData';
 
 // The receipt as an HTML document - the one template behind both exports.
 //
-// This is the web app's receipt markup and stylesheet (OrderReceiptModal
-// and the `.receipt-*` rules in index.css) carried over nearly line for
-// line, so an invoice shared from the phone is the same invoice a booker
-// sees in the browser. It is rendered two ways, exactly as on the web:
+// Descended from the former web app's receipt markup and stylesheet, then
+// tightened so that an order of up to 25 lines fits on ONE A4 page: the
+// header, parties and totals are kept compact and every table row is a
+// single short line. The sizes below are tuned against that budget (see
+// the notes on STYLES); ReceiptView.tsx mirrors them for the on-screen
+// preview. It is rendered two ways:
 //
 //   'pdf'   - expo-print lays it out on A4 pages. Print-only additions:
 //             page geometry, the table header repeating on every page,
@@ -37,6 +39,11 @@ function escapeHtml(value: string | number) {
     .replace(/'/g, '&#39;');
 }
 
+// Sizing budget for one A4 page (842pt tall, drawn edge to edge):
+//   header ~60 + parties ~66 + table head ~20 + 25 rows x 18 = 450 +
+//   footer ~125 = ~720, leaving room for a few product names that wrap.
+// Everything is in px, which expo-print maps 1:1 to points; checked by
+// printing a 25-line order through headless Chrome at 595x842.
 const STYLES = `
   @page { size: A4 portrait; margin: 0; }
   * { box-sizing: border-box; }
@@ -44,8 +51,8 @@ const STYLES = `
   body {
     color: ${C.charcoal};
     font-family: -apple-system, system-ui, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-    font-size: 13px;
-    line-height: 1.45;
+    font-size: 10.5px;
+    line-height: 1.2;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
@@ -57,127 +64,142 @@ const STYLES = `
     justify-content: space-between;
     background: ${C.navy};
     color: ${C.white};
-    padding: 22px 28px;
+    padding: 12px 22px;
   }
-  .receipt-brand { font-size: 22px; font-weight: 700; letter-spacing: 0.01em; }
-  .receipt-tagline { font-size: 12px; color: ${C.headerMuted}; margin-top: 2px; }
+  .receipt-brand { font-size: 18px; font-weight: 700; letter-spacing: 0.01em; line-height: 1.2; }
+  .receipt-tagline { font-size: 10.5px; color: ${C.headerMuted}; margin-top: 2px; }
   .receipt-header-right { text-align: right; }
-  .receipt-number { font-size: 17px; font-weight: 700; }
-  .receipt-date { font-size: 12px; color: ${C.headerMuted}; margin-top: 2px; }
+  .receipt-number { font-size: 14px; font-weight: 700; line-height: 1.2; }
+  /* Date and status share a line to keep the header short. */
+  .receipt-date { font-size: 10.5px; color: ${C.headerMuted}; margin-top: 3px; }
   .receipt-status {
     display: inline-block;
-    margin-top: 8px;
-    padding: 3px 10px;
+    vertical-align: middle;
+    margin-left: 8px;
+    padding: 2px 8px;
     border-radius: 999px;
-    font-size: 10px;
+    font-size: 8.5px;
     font-weight: 700;
     letter-spacing: 0.04em;
+    line-height: 1.3;
     color: ${C.white};
   }
   .receipt-status-submitted { background: ${C.submitted}; }
   .receipt-status-cancelled { background: ${C.cancelled}; }
-  .receipt-parties { display: flex; padding: 20px 28px 16px; }
-  .receipt-party { width: 50%; padding-right: 20px; }
+  .receipt-parties { display: flex; padding: 8px 22px 6px; }
+  .receipt-party { width: 50%; padding-right: 16px; }
   .receipt-party-label {
-    font-size: 10px;
+    font-size: 8.5px;
     font-weight: 700;
     letter-spacing: 0.06em;
     color: ${C.muted};
-    margin-bottom: 4px;
+    margin-bottom: 2px;
   }
-  .receipt-party-name { font-size: 15px; font-weight: 700; color: ${C.navy}; }
-  .receipt-party-line { font-size: 12px; color: ${C.muted}; }
+  .receipt-party-name { font-size: 12.5px; font-weight: 700; color: ${C.navy}; }
+  .receipt-party-code { font-size: 9.5px; font-weight: 400; color: ${C.muted}; margin-left: 6px; white-space: nowrap; }
+  .receipt-party-line { font-size: 10px; color: ${C.muted}; }
   /* Fixed layout with explicit column widths, so the columns sit in the
-     same place on every page, screen and export. */
+     same place on every page, screen and export. Left to right: S.NO,
+     product, qty, bonus, discount, rate, line total. */
   .receipt-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
   .receipt-table thead { display: table-header-group; }
   .receipt-table tr { page-break-inside: avoid; break-inside: avoid; }
-  .receipt-table col.col-product { width: 35%; }
-  .receipt-table col.col-rate { width: 12%; }
-  .receipt-table col.col-paid { width: 12%; }
-  .receipt-table col.col-bonus { width: 10%; }
-  .receipt-table col.col-discount { width: 11%; }
-  .receipt-table col.col-total { width: 20%; }
+  /* The S.NO column carries the 22px page gutter, so it needs the extra
+     width for its two or three digits. */
+  .receipt-table col.col-serial { width: 9%; }
+  .receipt-table col.col-product { width: 41%; }
+  .receipt-table col.col-paid { width: 7%; }
+  .receipt-table col.col-bonus { width: 8%; }
+  .receipt-table col.col-discount { width: 9%; }
+  .receipt-table col.col-rate { width: 11%; }
+  .receipt-table col.col-total { width: 15%; }
   .receipt-table th,
-  .receipt-table td { padding: 10px 12px; text-align: left; }
+  .receipt-table td { padding: 2px 7px; text-align: left; }
   .receipt-table thead th {
     background: ${C.navyAccent};
     color: ${C.white};
-    font-size: 11px;
+    font-size: 9.5px;
     font-weight: 700;
     letter-spacing: 0.03em;
+    padding-top: 4px;
+    padding-bottom: 4px;
   }
   .receipt-table th:first-child,
-  .receipt-table td:first-child { padding-left: 28px; }
+  .receipt-table td:first-child { padding-left: 22px; }
   .receipt-table th:last-child,
-  .receipt-table td:last-child { padding-right: 28px; }
+  .receipt-table td:last-child { padding-right: 22px; }
   .receipt-table td { border-bottom: 1px solid ${C.hairline}; vertical-align: top; overflow-wrap: anywhere; }
   .receipt-table tbody tr:nth-child(even) td { background: ${C.zebra}; }
   /* Numeric headers and cells share one rule at one specificity, so the
      figures line up under their headings. */
   .receipt-table th.receipt-num,
   .receipt-table td.receipt-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .receipt-bonus-cell { display: flex; justify-content: flex-end; }
+  .receipt-table th.receipt-center,
+  .receipt-table td.receipt-center { text-align: center; font-variant-numeric: tabular-nums; }
+  .receipt-serial { color: ${C.muted}; white-space: nowrap; overflow-wrap: normal; }
+  /* Name and code share one line, so a row stays ~18px tall unless the
+     name itself is long enough to wrap. */
   .receipt-product { font-weight: 600; color: ${C.navy}; }
-  .receipt-code { font-size: 11px; color: ${C.muted}; }
+  .receipt-code { font-weight: 400; font-size: 9px; color: ${C.muted}; margin-left: 5px; white-space: nowrap; }
   .receipt-line-total { font-weight: 700; color: ${C.navy}; }
   .receipt-bonus {
     display: inline-block;
-    padding: 1px 7px;
+    padding: 0 6px;
     border-radius: 999px;
     background: ${C.bonusFill};
     color: ${C.bonusText};
     font-weight: 700;
-    font-size: 12px;
+    font-size: 9.5px;
+    line-height: 13px;
   }
   .receipt-footer {
     display: flex;
     justify-content: space-between;
-    padding: 18px 28px 26px;
+    padding: 10px 22px 14px;
     page-break-inside: avoid;
     break-inside: avoid;
   }
-  .receipt-remarks { width: 55%; padding-right: 24px; }
-  .receipt-remarks-text { font-size: 12px; color: ${C.charcoal}; white-space: pre-wrap; }
-  .receipt-note { margin-top: 10px; font-size: 11px; color: ${C.muted}; }
-  .receipt-cancelled-note { margin-top: 10px; font-size: 12px; font-weight: 700; color: ${C.cancelled}; }
-  .receipt-totals { width: 45%; max-width: 300px; }
+  .receipt-remarks { width: 55%; padding-right: 20px; }
+  .receipt-remarks-text { font-size: 10.5px; color: ${C.charcoal}; white-space: pre-wrap; }
+  .receipt-note { margin-top: 6px; font-size: 9.5px; color: ${C.muted}; }
+  .receipt-cancelled-note { margin-top: 6px; font-size: 10.5px; font-weight: 700; color: ${C.cancelled}; }
+  .receipt-totals { width: 45%; max-width: 260px; }
   .receipt-total-row {
     display: flex;
     justify-content: space-between;
-    font-size: 12px;
+    font-size: 10.5px;
     color: ${C.muted};
-    padding: 3px 0;
+    padding: 1.5px 0;
   }
   .receipt-total-row strong { color: ${C.charcoal}; font-variant-numeric: tabular-nums; }
   .receipt-grand-total {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-top: 10px;
-    padding: 11px 14px;
+    margin-top: 6px;
+    padding: 8px 12px;
     background: ${C.navy};
     color: ${C.white};
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 700;
     letter-spacing: 0.04em;
   }
-  .receipt-grand-total strong { font-size: 18px; font-variant-numeric: tabular-nums; }
+  .receipt-grand-total strong { font-size: 15px; font-variant-numeric: tabular-nums; }
 `;
 
 function renderLine(line: Receipt['lines'][number]) {
   return `
     <tr>
+      <td class="receipt-center receipt-serial">${line.serial}</td>
       <td>
-        <div class="receipt-product">${escapeHtml(line.name)}</div>
-        ${line.code ? `<div class="receipt-code">${escapeHtml(line.code)}</div>` : ''}
+        <span class="receipt-product">${escapeHtml(line.name)}</span>${
+          line.code ? `<span class="receipt-code">${escapeHtml(line.code)}</span>` : ''
+        }
       </td>
-      <td class="receipt-num">${escapeHtml(formatMoney(line.rate))}</td>
       <td class="receipt-num">${line.paidQty}</td>
-      <td class="receipt-num">
-        <div class="receipt-bonus-cell">${line.bonusQty > 0 ? `<span class="receipt-bonus">+${line.bonusQty}</span>` : '—'}</div>
-      </td>
+      <td class="receipt-num">${line.bonusQty > 0 ? `<span class="receipt-bonus">+${line.bonusQty}</span>` : '—'}</td>
       <td class="receipt-num">${line.discount > 0 ? `${escapeHtml(formatMoney(line.discount))}%` : '—'}</td>
+      <td class="receipt-num">${escapeHtml(formatMoney(line.rate))}</td>
       <td class="receipt-num receipt-line-total">${escapeHtml(formatMoney(line.lineTotal))}</td>
     </tr>`;
 }
@@ -236,18 +258,21 @@ export function buildReceiptHtml(receipt: Receipt, mode: ReceiptRenderMode = 'pd
       </div>
       <div class="receipt-header-right">
         <div class="receipt-number">${escapeHtml(receipt.orderNumber || 'DRAFT')}</div>
-        <div class="receipt-date">${escapeHtml(receipt.dateLabel)}</div>
-        <span class="receipt-status ${isCancelled ? 'receipt-status-cancelled' : 'receipt-status-submitted'}">
-          ${escapeHtml(receipt.statusLabel.toUpperCase())}
-        </span>
+        <div class="receipt-date">
+          ${escapeHtml(receipt.dateLabel)}
+          <span class="receipt-status ${isCancelled ? 'receipt-status-cancelled' : 'receipt-status-submitted'}">${escapeHtml(
+            receipt.statusLabel.toUpperCase()
+          )}</span>
+        </div>
       </div>
     </div>
 
     <div class="receipt-parties">
       <div class="receipt-party">
         <div class="receipt-party-label">BILL TO</div>
-        <div class="receipt-party-name">${escapeHtml(customer.name)}</div>
-        ${customer.code ? `<div class="receipt-party-line">${escapeHtml(customer.code)}</div>` : ''}
+        <div class="receipt-party-name">${escapeHtml(customer.name)}${
+          customer.code ? `<span class="receipt-party-code">${escapeHtml(customer.code)}</span>` : ''
+        }</div>
         ${customer.address ? `<div class="receipt-party-line">${escapeHtml(customer.address)}</div>` : ''}
         ${customer.phone ? `<div class="receipt-party-line">${escapeHtml(customer.phone)}</div>` : ''}
       </div>
@@ -259,20 +284,22 @@ export function buildReceiptHtml(receipt: Receipt, mode: ReceiptRenderMode = 'pd
 
     <table class="receipt-table">
       <colgroup>
+        <col class="col-serial" />
         <col class="col-product" />
-        <col class="col-rate" />
         <col class="col-paid" />
         <col class="col-bonus" />
         <col class="col-discount" />
+        <col class="col-rate" />
         <col class="col-total" />
       </colgroup>
       <thead>
         <tr>
-          <th>Product</th>
-          <th class="receipt-num">Rate</th>
-          <th class="receipt-num">Paid Qty</th>
+          <th class="receipt-center">S.NO</th>
+          <th>Product Name</th>
+          <th class="receipt-num">Qty</th>
           <th class="receipt-num">Bonus</th>
           <th class="receipt-num">Disc %</th>
+          <th class="receipt-num">Rate</th>
           <th class="receipt-num">Line Total</th>
         </tr>
       </thead>

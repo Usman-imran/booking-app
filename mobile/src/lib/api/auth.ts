@@ -6,6 +6,8 @@ export type PublicUser = {
   username: string;
   phone: string | null;
   companyName: string | null;
+  // The line printed under the company name on receipts; null = default.
+  tagline: string | null;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -22,6 +24,7 @@ export function register(input: {
   username: string;
   password: string;
   companyName: string;
+  tagline?: string;
   phone?: string;
 }): Promise<AuthResponse> {
   return apiClient.post('/auth/register', input);
@@ -31,8 +34,8 @@ export function me(): Promise<{ user: PublicUser }> {
   return apiClient.get('/auth/me');
 }
 
-// Renames the business for the signed-in account only. Returns the
-// refreshed user.
-export function updateCompanyName(companyName: string): Promise<{ user: PublicUser }> {
-  return apiClient.put('/auth/company', { companyName });
+// Renames the business and sets its receipt tagline, for the signed-in
+// account only. An empty tagline clears it. Returns the refreshed user.
+export function updateCompanyProfile(input: { companyName: string; tagline?: string | null }): Promise<{ user: PublicUser }> {
+  return apiClient.put('/auth/company', input);
 }
