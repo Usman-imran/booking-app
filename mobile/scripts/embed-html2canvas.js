@@ -1,17 +1,18 @@
-// Regenerates src/lib/receipt/html2canvasSource.ts from the web app's copy
-// of html2canvas, so the mobile JPG export runs exactly the library the
-// web app's JPG export runs. Re-run after bumping html2canvas in
-// frontend/package.json:
+// Regenerates src/lib/receipt/html2canvasSource.ts from the html2canvas
+// devDependency, so the receipt JPG export can run the library inside a
+// WebView without fetching it at share time. Re-run after bumping
+// html2canvas in package.json:
 //
 //   node scripts/embed-html2canvas.js
 const fs = require('fs');
 const path = require('path');
 
-const source = path.join(__dirname, '..', '..', 'frontend', 'node_modules', 'html2canvas');
+const source = path.dirname(require.resolve('html2canvas/package.json'));
 const pkg = JSON.parse(fs.readFileSync(path.join(source, 'package.json'), 'utf8'));
 const min = fs.readFileSync(path.join(source, 'dist', 'html2canvas.min.js'), 'utf8');
 
-const out = path.join(__dirname, '..', 'src', 'lib', 'receipt', 'html2canvasSource.ts');
+const root = path.dirname(require.resolve('../package.json'));
+const out = path.join(root, 'src', 'lib', 'receipt', 'html2canvasSource.ts');
 fs.writeFileSync(
   out,
   [

@@ -4,6 +4,12 @@ A standalone, open-source order-booking and basic sales-management application f
 
 See [`PROJECT_SPEC.md`](./PROJECT_SPEC.md) for the full product and technical specification. That document is the source of truth for all features and business rules.
 
+The repository holds two apps: the **backend** (Node.js + Express + PostgreSQL) and the **mobile** app (Expo /
+React Native), which is the client bookers use. The original React web frontend was retired once the mobile app
+reached feature parity with it and has been removed; the per-screen notes further down were written against that
+web client and still describe the behaviour the mobile screens mirror, but any `frontend/src/...` path they mention
+no longer exists — the equivalent code lives under `mobile/src/`.
+
 ## Status
 
 **Stage 1 — Project Foundation: complete.** Project scaffolding, basic routing, the PostgreSQL/migrations foundation, a clean REST API structure with centralized error handling, and a reusable frontend API client are all in place and verified.
@@ -42,14 +48,16 @@ order-booking-app/
 │   │   └── server.js   Entry point
 │   ├── .node-pg-migraterc
 │   └── .env.example
-├── frontend/           React app (Vite)
+├── mobile/             Expo (React Native) app
 │   ├── src/
-│   │   ├── api/        Reusable API client (fetch wrapper, carries the auth token) + customers.js, products.js, companies.js, orders.js, users.js, reports.js, targets.js
-│   │   ├── auth/       AuthContext (session state, login/logout, hydration on refresh)
-│   │   ├── components/ Shared UI (layout, nav, ProtectedRoute, ConfirmDialog, ErrorBoundary) + orders/ (receipt)
-│   │   ├── pages/      Login, Dashboard, pages/customers/, pages/products/, pages/companies/, pages/orders/, pages/reports/, pages/targets/
-│   │   ├── App.jsx     Route definitions
-│   │   └── main.jsx    Entry point
+│   │   ├── app/        File-based routes (expo-router): sign-in/sign-up, (tabs)/, customers/, products/, orders/, companies/, reports, targets, settings, analytics
+│   │   ├── screens/    The screen components the routes render
+│   │   ├── components/ Shared UI (form fields, buttons, cards, order components)
+│   │   ├── lib/        API client + per-resource modules, auth context, order maths, receipt rendering/sharing, theme
+│   │   └── ...
+│   ├── scripts/        embed-html2canvas.js (regenerates the inlined receipt renderer)
+│   ├── app.json        Expo config (Android package name, version, permissions, icons)
+│   ├── eas.json        EAS Build / Submit profiles
 │   └── .env.example
 ├── PROJECT_SPEC.md
 └── README.md
@@ -62,7 +70,7 @@ order-booking-app/
 
 ## Quick Start
 
-Two terminals — one per app, since `npm run dev` keeps running in each:
+Two terminals — one per app, since each dev server keeps running:
 
 ```bash
 # Terminal 1 — backend
@@ -72,21 +80,22 @@ npm install
 npm run migrate:up   # requires a running PostgreSQL — see Database Setup below
 npm run dev           # http://localhost:5000
 
-# Terminal 2 — frontend
-cd frontend
-cp .env.example .env
+# Terminal 2 — mobile app
+cd mobile
+cp .env.example .env  # optional in development — see the comments in the file
 npm install
-npm run dev           # http://localhost:5173
+npx expo start        # then open it in Expo Go / an emulator from the Metro menu
 ```
 
-Open `http://localhost:5173` — the Dashboard page shows a live "Backend status" check. Or verify from the command line:
+Verify the backend from the command line:
 
 ```bash
 curl http://localhost:5000/api/health
 curl http://localhost:5000/api/health/db
 ```
 
-To build the frontend for production: `cd frontend && npm run build` (output in `frontend/dist/`).
+To produce a Google Play build: `cd mobile && eas build --platform android --profile production` (see `mobile/eas.json`;
+set `EXPO_PUBLIC_API_BASE_URL` for the production profile first).
 
 ## Getting Started
 
@@ -153,9 +162,11 @@ You can also check DB connectivity through the running API: `curl http://localho
 - **Uniqueness** is enforced at the database level regardless of the generator (the `orders.order_number` `UNIQUE` constraint from the schema above) — confirmed by trying to insert a duplicate directly via SQL and getting a `23505`.
 - Verified with 38 automated checks against a real PostgreSQL instance: exact format, sequential same-day numbers, a different day's counter left untouched (daily reset), sequence-exhaustion detection, rollback-then-reclaim with zero gap, drafts consuming no numbers, duplicate/non-existent/wrong-status submit and cancel attempts all rejected, cancelled orders keeping their number forever, same-day/same-customer orders getting distinct numbers, DB-level duplicate rejection, and **15 real concurrent `submitOrder()` calls producing 15 unique, perfectly contiguous numbers with no gaps or collisions**.
 
-### Frontend
+### Mobile app
 
-See [Quick Start](#quick-start) — `cd frontend && cp .env.example .env && npm install && npm run dev`, then open `http://localhost:5173`.
+See [Quick Start](#quick-start) — `cd mobile && npm install && npx expo start`. In development the app works out
+the backend's address from the Expo dev server's host, so a `.env` is only needed when the backend runs somewhere
+else (`mobile/.env.example` explains the cases).
 
 ## Authentication
 
@@ -925,13 +936,13 @@ navigation now leads to a real screen.
 Each app has its own `.env.example`:
 
 - `backend/.env.example` — server port, CORS origin, PostgreSQL connection settings, and `JWT_SECRET`/`JWT_EXPIRES_IN` for authentication.
-- `frontend/.env.example` — API base URL used by the frontend.
+- `mobile/.env.example` — `EXPO_PUBLIC_API_BASE_URL`, the backend address the app should call (optional in development).
 
 Copy each to `.env` in the same folder and adjust as needed. Never commit `.env` files.
 
 ## Known Issues
 
-- `npm audit` reports a few moderate/high advisories in transitive dependencies (`qs`/`body-parser` behind `express` in the backend; `esbuild`/`react-router` behind `vite`/`react-router-dom` in the frontend). No non-breaking fix is currently available (`npm audit fix` makes no changes); the only fixes require a major upgrade (Express 5, Vite 6+, React Router 7). Not addressed in this stage to avoid an unrequested breaking change — revisit in a maintenance pass.
+- `npm audit` reports a few moderate/high advisories in transitive dependencies (`qs`/`body-parser` behind `express` in the backend). No non-breaking fix is currently available (`npm audit fix` makes no changes); the only fix requires a major upgrade to Express 5. Not addressed to avoid an unrequested breaking change — revisit in a maintenance pass.
 - `xlsx` (SheetJS), added for the bulk product import, is pinned at 0.18.5 — the newest version published to the npm
   registry. SheetJS moved later releases to their own CDN, so `npm audit` reports advisories against it with no npm
   upgrade available. The exposure here is limited: the parser only ever sees a file an authenticated booker uploaded

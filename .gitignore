@@ -22,9 +22,6 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 
-# Vite
-frontend/.vite/
-
 # Local dev-only PostgreSQL (see backend/.local-pg/README.md)
 backend/.local-pg/
 

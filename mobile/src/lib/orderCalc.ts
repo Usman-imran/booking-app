@@ -1,7 +1,7 @@
 import type { BonusScheme, Product } from './api/products';
 
 // Live order-line maths for the Create Order screen - a direct port of the
-// web frontend's orderCalc.js, which itself mirrors the backend's
+// former web frontend's orderCalc.js, which itself mirrors the backend's
 // orderPricing.js rule for rule. The booker has to see the line total and
 // bonus quantity update as they type; the server never trusts these numbers
 // and recomputes every one of them at save time.

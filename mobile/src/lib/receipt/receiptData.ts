@@ -1,8 +1,8 @@
 import type { OrderDetail } from '@/lib/api/orders';
 
-// One derivation of everything a receipt shows - a direct port of the web
-// frontend's receiptData.js so the mobile invoice prints exactly the same
-// figures as the web one.
+// One derivation of everything a receipt shows - a direct port of the
+// former web frontend's receiptData.js, so the mobile invoice prints the
+// same figures the web one did.
 //
 // The receipt is rendered twice on mobile as well - as a native view (for
 // the on-screen preview and the JPG) and as HTML (for the PDF) - so the

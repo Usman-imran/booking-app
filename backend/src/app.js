@@ -7,12 +7,14 @@ import errorHandler from './middleware/errorHandler.js';
 const app = express();
 
 // CORS_ORIGIN is a comma-separated list of allowed origins, e.g.
-//   CORS_ORIGIN=http://localhost:5173,https://app.example.com
-// Unset means allow everything. Outside production, any localhost /
-// 127.0.0.1 origin is also accepted regardless of port, so the app keeps
-// working when Vite falls back to 5174, or when it is opened via
-// 127.0.0.1 instead of localhost — both of which otherwise fail in the
-// browser as an opaque "Failed to fetch".
+//   CORS_ORIGIN=http://localhost:8081,https://app.example.com
+// Unset means allow everything. Only browsers send an Origin header - the
+// native mobile app never does and is never blocked by this - so it matters
+// for the app's web build (`npx expo start --web`). Outside production, any
+// localhost / 127.0.0.1 origin is also accepted regardless of port, so the
+// web build keeps working when Metro picks another port, or when it is
+// opened via 127.0.0.1 instead of localhost — both of which otherwise fail
+// in the browser as an opaque "Failed to fetch".
 const allowedOrigins = (process.env.CORS_ORIGIN || '')
   .split(',')
   .map((value) => value.trim())

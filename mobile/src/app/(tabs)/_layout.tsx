@@ -16,8 +16,8 @@ function TabIcon({ active, inactive, color, focused, size }: TabIconProps & { ac
 }
 
 // The signed-in area of the app. Guards every tab at once: without a
-// session there is nothing to show, so bounce to sign-in - mirroring
-// ProtectedRoute in the web frontend.
+// session there is nothing to show, so bounce to sign-in - the mobile
+// counterpart of the former web frontend's ProtectedRoute.
 export default function TabsLayout() {
   const { user, isLoading } = useAuth();
 
