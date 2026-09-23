@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -18,19 +18,24 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { PressableScale } from '@/components/PressableScale';
+import { Chip } from '@/components/ui/Chip';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { SearchField } from '@/components/ui/SearchField';
 import { listCustomerAreas, listCustomers, type Customer } from '@/lib/api/customers';
 import { searchCachedCustomers, withOfflineFallback } from '@/lib/offline/offlineCache';
-import { colors, initialsOf, radius, spacing } from '@/lib/theme';
+import { colors, formatMoney, initialsOf, radius, spacing } from '@/lib/theme';
+import { useOpenAmounts } from '@/lib/useOpenAmounts';
 import { usePaginatedList, useRevalidateOnFocus } from '@/lib/usePaginatedList';
 
-type StatusFilter = 'all' | 'active' | 'inactive';
+// 'open' is the only one the server can't answer: it is applied to the
+// loaded rows from the amounts worked out on the device.
+type StatusFilter = 'all' | 'active' | 'inactive' | 'open';
 
-const STATUS_CHIPS: { key: StatusFilter; label: string }[] = [
+const STATUS_CHIPS: { key: StatusFilter; label: string; icon?: keyof typeof Ionicons.glyphMap }[] = [
   { key: 'all', label: 'All' },
   { key: 'active', label: 'Active' },
   { key: 'inactive', label: 'Inactive' },
+  { key: 'open', label: 'Outstanding', icon: 'alert-circle-outline' },
 ];
 
 // A phone number as WhatsApp wants it: digits only, with the country code.
@@ -50,23 +55,12 @@ async function openUrl(url: string, fallback: string) {
   }
 }
 
-function Chip({ label, active, onPress, icon }: { label: string; active: boolean; onPress: () => void; icon?: keyof typeof Ionicons.glyphMap }) {
-  return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityState={{ selected: active }}
-      style={({ pressed }) => [styles.chip, active && styles.chipActive, pressed && { opacity: 0.7 }]}>
-      {icon ? <Ionicons name={icon} size={13} color={active ? '#fff' : colors.textMuted} /> : null}
-      <Text style={[styles.chipText, active && styles.chipTextActive]}>{label}</Text>
-    </Pressable>
-  );
-}
-
 // One customer as a contact card: the shop, who to ask for, where it is,
-// and one-tap Call / WhatsApp when there's a number.
-function CustomerCard({ customer }: { customer: Customer }) {
+// what is still open with them, and one-tap Call / WhatsApp when there's a
+// number.
+function CustomerCard({ customer, openAmount }: { customer: Customer; openAmount: number }) {
   const phone = customer.phone?.trim() || customer.alternatePhone?.trim() || null;
+  const hasOpen = openAmount > 0;
 
   return (
     <PressableScale style={styles.card} onPress={() => router.push(`/customers/${customer.id}`)}>
@@ -84,6 +78,16 @@ function CustomerCard({ customer }: { customer: Customer }) {
             {customer.code}
             {customer.contactPerson ? ` · ${customer.contactPerson}` : ''}
           </Text>
+          <View style={[styles.balance, hasOpen ? styles.balanceDue : styles.balanceClear]}>
+            <Ionicons
+              name={hasOpen ? 'alert-circle' : 'checkmark-circle'}
+              size={12}
+              color={hasOpen ? colors.danger : colors.success}
+            />
+            <Text style={[styles.balanceText, hasOpen ? styles.balanceTextDue : styles.balanceTextClear]}>
+              {hasOpen ? `Rs ${formatMoney(openAmount)} open` : 'Clear'}
+            </Text>
+          </View>
         </View>
         {phone ? (
           <View style={styles.contactButtons}>
@@ -159,7 +163,9 @@ export function CustomersScreen() {
 
   const fetchPage = useCallback(
     async (page: number, search: string) => {
-      const isActive = status === 'all' ? undefined : status === 'active';
+      // 'open' is not a server-side state, so it asks for everyone and
+      // narrows the rows below.
+      const isActive = status === 'active' ? true : status === 'inactive' ? false : undefined;
       const { data } = await withOfflineFallback(
         () =>
           listCustomers({ page, limit: 25, search: search || undefined, isActive, cityArea: area ?? undefined }).then(
@@ -181,16 +187,26 @@ export function CustomersScreen() {
   );
 
   const list = usePaginatedList(fetchPage);
+  const open = useOpenAmounts();
   const { revalidate } = list;
+  const { reload: reloadOpen } = open;
   useRevalidateOnFocus(
     useCallback(() => {
       revalidate();
       loadAreas();
-    }, [revalidate, loadAreas])
+      reloadOpen();
+    }, [revalidate, loadAreas, reloadOpen])
+  );
+
+  // The Outstanding chip narrows what has been loaded: the amounts are
+  // worked out on the device, so the server can't filter on them.
+  const rows = useMemo(
+    () => (status === 'open' ? list.items.filter((c) => (open.byCustomer.get(c.id) ?? 0) > 0) : list.items),
+    [status, list.items, open.byCustomer]
   );
 
   const filtered = status !== 'all' || area !== null;
-  const total = list.pagination?.total;
+  const total = status === 'open' ? rows.length : list.pagination?.total;
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -206,7 +222,13 @@ export function CustomersScreen() {
         />
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips} style={styles.chipsRow}>
           {STATUS_CHIPS.map((chip) => (
-            <Chip key={chip.key} label={chip.label} active={status === chip.key} onPress={() => setStatus(chip.key)} />
+            <Chip
+              key={chip.key}
+              label={chip.label}
+              icon={chip.icon}
+              active={status === chip.key}
+              onPress={() => setStatus(chip.key)}
+            />
           ))}
           {areas.length > 0 ? <View style={styles.chipDivider} /> : null}
           {areas.map((item) => (
@@ -229,12 +251,21 @@ export function CustomersScreen() {
         <ErrorState message={`Could not load customers: ${list.error}`} onRetry={list.retry} />
       ) : (
         <FlatList
-          data={list.items}
+          data={rows}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
-          renderItem={({ item }) => <CustomerCard customer={item} />}
+          renderItem={({ item }) => (
+            <CustomerCard customer={item} openAmount={open.byCustomer.get(item.id) ?? 0} />
+          )}
           refreshControl={
-            <RefreshControl refreshing={list.isRefreshing} onRefresh={list.refresh} tintColor={colors.primary} />
+            <RefreshControl
+              refreshing={list.isRefreshing}
+              onRefresh={() => {
+                list.refresh();
+                reloadOpen();
+              }}
+              tintColor={colors.primary}
+            />
           }
           onEndReached={list.loadMore}
           onEndReachedThreshold={0.4}
@@ -271,20 +302,6 @@ const styles = StyleSheet.create({
   search: { marginHorizontal: spacing.xl },
   chipsRow: { flexGrow: 0 },
   chips: { paddingHorizontal: spacing.xl, paddingVertical: spacing.md, gap: spacing.sm, alignItems: 'center' },
-  chip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: spacing.md + 2,
-    paddingVertical: 7,
-    borderRadius: radius.full,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  chipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  chipText: { fontSize: 13, fontWeight: '600', color: colors.textSecondary },
-  chipTextActive: { color: '#fff' },
   chipDivider: { width: 1, height: 20, backgroundColor: colors.border, marginHorizontal: 2 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   // Room at the bottom so the last card clears the floating button.
@@ -311,6 +328,21 @@ const styles = StyleSheet.create({
   monogramInactive: { backgroundColor: colors.surfaceMuted },
   monogramText: { fontSize: 15, fontWeight: '800', color: colors.primaryDark },
   cardMain: { flex: 1, gap: 2 },
+  balance: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 3,
+    marginTop: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: radius.sm,
+  },
+  balanceDue: { backgroundColor: colors.dangerSoft },
+  balanceClear: { backgroundColor: colors.successSoft },
+  balanceText: { fontSize: 10.5, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  balanceTextDue: { color: colors.danger },
+  balanceTextClear: { color: colors.success },
   shop: { fontSize: 15, fontWeight: '700', color: colors.text },
   meta: { fontSize: 12.5, color: colors.textMuted },
   contactButtons: { flexDirection: 'row', gap: spacing.sm },

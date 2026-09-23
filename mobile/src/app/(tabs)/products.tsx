@@ -1,111 +1,157 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useCallback } from 'react';
-import {
-  ActivityIndicator,
-  FlatList,
-  Pressable,
-  RefreshControl,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { PressableScale } from '@/components/PressableScale';
-import { listProducts, type Product } from '@/lib/api/products';
-import { formatTier } from '@/lib/orderCalc';
-import { cardShadow, colors, formatMoney, radius, spacing } from '@/lib/theme';
+import { ProductGridCard, ProductListCard } from '@/components/products/ProductCard';
+import { Chip } from '@/components/ui/Chip';
+import { ScreenHeader } from '@/components/ui/ScreenHeader';
+import { SearchField } from '@/components/ui/SearchField';
+import { listProductCompanies, listProducts, type Product } from '@/lib/api/products';
+import { cachedCompanies, searchCachedProducts, withOfflineFallback } from '@/lib/offline/offlineCache';
+import { colors, radius, spacing } from '@/lib/theme';
 import { usePaginatedList, useRevalidateOnFocus } from '@/lib/usePaginatedList';
 
-function ProductCard({ product, onPress }: { product: Product; onPress: () => void }) {
-  const hasScheme = product.bonusSchemes.length > 0;
+type ViewMode = 'list' | 'grid';
+
+// How many products the offline copy will show at once. The device holds
+// the whole catalogue, but a list that long has to stop somewhere.
+const OFFLINE_LIMIT = 500;
+
+function ViewToggle({ value, onChange }: { value: ViewMode; onChange: (mode: ViewMode) => void }) {
   return (
-    <PressableScale style={styles.card} onPress={onPress}>
-      <View style={styles.cardIcon}>
-        <Ionicons name="cube-outline" size={22} color={colors.primary} />
-      </View>
-      <View style={styles.cardMain}>
-        <Text style={styles.productName} numberOfLines={1}>
-          {product.name}
-        </Text>
-        <Text style={styles.productMeta} numberOfLines={1}>
-          {product.code} · {product.company}
-          {product.packing ? ` · ${product.packing}` : ''}
-        </Text>
-        <View style={styles.tags}>
-          {!product.isActive ? <Text style={[styles.tag, styles.tagInactive]}>Inactive</Text> : null}
-          {hasScheme ? (
-            <Text style={[styles.tag, styles.tagScheme]} numberOfLines={1}>
-              {product.bonusSchemes.map(formatTier).join(', ')} free
-            </Text>
-          ) : null}
-          {product.discount > 0 ? <Text style={[styles.tag, styles.tagDiscount]}>{product.discount}% off</Text> : null}
-        </View>
-      </View>
-      <View style={styles.cardEnd}>
-        <Text style={styles.price}>{formatMoney(product.salePrice)}</Text>
-        <Text style={styles.mrp}>MRP {formatMoney(product.mrp)}</Text>
-      </View>
-    </PressableScale>
+    <View style={styles.toggle}>
+      {(['list', 'grid'] as const).map((mode) => {
+        const active = value === mode;
+        return (
+          <Pressable
+            key={mode}
+            onPress={() => onChange(mode)}
+            accessibilityRole="button"
+            accessibilityState={{ selected: active }}
+            accessibilityLabel={mode === 'list' ? 'List view' : 'Grid view'}
+            style={({ pressed }) => [styles.toggleButton, active && styles.toggleActive, pressed && { opacity: 0.6 }]}>
+            <Ionicons name={mode} size={16} color={active ? colors.primaryDark : colors.textMuted} />
+          </Pressable>
+        );
+      })}
+    </View>
   );
 }
 
+// The catalogue: search and the company carousel pinned at the top, the
+// products below as rows or tiles. Offline it falls back to the copy saved
+// on the device, the same way Orders and Customers do.
 export default function Products() {
-  const fetchPage = useCallback(async (page: number, search: string) => {
-    const result = await listProducts({ page, limit: 25, search: search || undefined });
-    return { items: result.products, pagination: result.pagination };
+  const [view, setView] = useState<ViewMode>('list');
+  const [company, setCompany] = useState<string | null>(null);
+  const [companies, setCompanies] = useState<string[]>([]);
+
+  // The manufacturers behind the carousel. Quiet on failure: offline there
+  // are still the companies of whatever is saved on the device.
+  const loadCompanies = useCallback(() => {
+    listProductCompanies()
+      .then((data) => setCompanies(data.companies))
+      .catch(() => setCompanies(cachedCompanies()));
   }, []);
 
-  const list = usePaginatedList(fetchPage);
+  useEffect(() => {
+    loadCompanies();
+  }, [loadCompanies]);
 
-  useRevalidateOnFocus(list.revalidate);
+  const fetchPage = useCallback(
+    async (page: number, search: string) => {
+      const { data } = await withOfflineFallback(
+        () =>
+          listProducts({ page, limit: 25, search: search || undefined, company: company ?? undefined }).then(
+            (result) => ({ items: result.products, pagination: result.pagination })
+          ),
+        () => {
+          // Only one "page" is held locally, so scrolling past the first
+          // just stops rather than repeating it.
+          if (page > 1) return null;
+          const rows = searchCachedProducts({ search, company: company ?? undefined, limit: OFFLINE_LIMIT });
+          if (!rows) return null;
+          return {
+            items: rows as Product[],
+            pagination: { page: 1, limit: rows.length, total: rows.length, totalPages: 1 },
+          };
+        }
+      );
+      return data;
+    },
+    [company]
+  );
+
+  const list = usePaginatedList(fetchPage);
+  const { revalidate } = list;
+  useRevalidateOnFocus(
+    useCallback(() => {
+      revalidate();
+      loadCompanies();
+    }, [revalidate, loadCompanies])
+  );
+
+  const isGrid = view === 'grid';
+  const total = list.pagination?.total;
+  const eyebrow = total === undefined ? null : company ? `${total} in ${company}` : `${total} products`;
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.title}>Products</Text>
-          {list.pagination ? <Text style={styles.count}>{list.pagination.total} total</Text> : null}
-        </View>
-        <View style={styles.headerActions}>
-          <Pressable
-            onPress={() => router.push('/products/import')}
-            hitSlop={6}
-            style={({ pressed }) => [styles.iconButton, pressed && { opacity: 0.7 }]}>
-            <Ionicons name="cloud-upload-outline" size={22} color={colors.primary} />
-          </Pressable>
-          <Pressable
-            onPress={() => router.push('/products/new')}
-            hitSlop={6}
-            style={({ pressed }) => [styles.iconButton, styles.iconButtonPrimary, pressed && { opacity: 0.7 }]}>
-            <Ionicons name="add" size={24} color="#fff" />
-          </Pressable>
-        </View>
-      </View>
+      <ScreenHeader
+        title="Products"
+        eyebrow={eyebrow}
+        right={
+          <View style={styles.headerActions}>
+            <Pressable
+              onPress={() => router.push('/products/import')}
+              hitSlop={6}
+              accessibilityLabel="Import products"
+              style={({ pressed }) => [styles.iconButton, pressed && { opacity: 0.7 }]}>
+              <Ionicons name="cloud-upload-outline" size={20} color={colors.primary} />
+            </Pressable>
+            <PressableScale
+              style={styles.newButton}
+              onPress={() => router.push('/products/new')}
+              accessibilityLabel="Add product">
+              <Ionicons name="add" size={20} color="#fff" />
+            </PressableScale>
+          </View>
+        }
+      />
 
-
-
-      <View style={styles.searchBox}>
-        <Ionicons name="search" size={18} color={colors.textMuted} />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search by name, code or company"
-          placeholderTextColor={colors.textMuted}
+      {/* Pinned: search, view toggle and companies stay put while the list scrolls. */}
+      <View style={styles.pinned}>
+        <SearchField
           value={list.search}
           onChangeText={list.setSearch}
-          autoCapitalize="none"
-          autoCorrect={false}
-          returnKeyType="search"
+          placeholder="Search name, code or company"
+          style={styles.search}
         />
-        {list.search ? (
-          <Pressable onPress={() => list.setSearch('')} hitSlop={8}>
-            <Ionicons name="close-circle" size={18} color={colors.textMuted} />
-          </Pressable>
-        ) : null}
+        <View style={styles.filterRow}>
+          <ViewToggle value={view} onChange={setView} />
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={styles.chips}>
+            <Chip label="All" icon="apps-outline" active={company === null} onPress={() => setCompany(null)} />
+            {companies.length > 0 ? <View style={styles.chipDivider} /> : null}
+            {companies.map((name) => (
+              <Chip
+                key={name}
+                label={name}
+                active={company?.toLowerCase() === name.toLowerCase()}
+                // Tapping the company you are already in clears the filter.
+                onPress={() => setCompany((current) => (current?.toLowerCase() === name.toLowerCase() ? null : name))}
+              />
+            ))}
+          </ScrollView>
+        </View>
       </View>
 
       {list.status === 'loading' ? (
@@ -116,12 +162,23 @@ export default function Products() {
         <ErrorState message={`Could not load products: ${list.error}`} onRetry={list.retry} />
       ) : (
         <FlatList
+          // A FlatList cannot change its column count in place, so the key
+          // rebuilds it when the view mode flips.
+          key={view}
           data={list.items}
           keyExtractor={(item) => item.id}
+          numColumns={isGrid ? 2 : 1}
+          columnWrapperStyle={isGrid ? styles.column : undefined}
           contentContainerStyle={styles.listContent}
-          renderItem={({ item }) => (
-            <ProductCard product={item} onPress={() => router.push(`/products/${item.id}`)} />
-          )}
+          keyboardShouldPersistTaps="handled"
+          renderItem={({ item }) => {
+            const open = () => router.push(`/products/${item.id}`);
+            return isGrid ? (
+              <ProductGridCard product={item} onPress={open} />
+            ) : (
+              <ProductListCard product={item} onPress={open} />
+            );
+          }}
           refreshControl={
             <RefreshControl refreshing={list.isRefreshing} onRefresh={list.refresh} tintColor={colors.primary} />
           }
@@ -130,8 +187,14 @@ export default function Products() {
           ListEmptyComponent={
             <EmptyState
               icon="cube-outline"
-              title={list.search ? 'No matching products' : 'No products yet'}
-              message={list.search ? 'Try a different search.' : 'Products you add will appear here.'}
+              title={list.search || company ? 'No matching products' : 'No products yet'}
+              message={
+                list.search
+                  ? 'Try a different search, or pick another company.'
+                  : company
+                    ? `Nothing in the catalogue for ${company} yet.`
+                    : 'Add a product, or import your price list from a spreadsheet.'
+              }
             />
           }
           ListFooterComponent={
@@ -145,78 +208,49 @@ export default function Products() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: spacing.xl,
-    paddingTop: spacing.lg,
-    paddingBottom: spacing.md,
-  },
-  title: { fontSize: 26, fontWeight: '700', color: colors.text },
-  count: { fontSize: 13, color: colors.textMuted, marginTop: 2 },
-  headerActions: { flexDirection: 'row', gap: spacing.sm },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   iconButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 40,
+    height: 40,
+    borderRadius: radius.full,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.primarySoft,
   },
-  iconButtonPrimary: { backgroundColor: colors.primary },
-  searchBox: {
-    flexDirection: 'row',
+  newButton: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.full,
     alignItems: 'center',
-    gap: spacing.sm,
-    marginHorizontal: spacing.xl,
-    marginBottom: spacing.md,
-    backgroundColor: colors.surface,
+    justifyContent: 'center',
+    backgroundColor: colors.primary,
+  },
+
+  pinned: {
+    backgroundColor: colors.background,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  search: { marginHorizontal: spacing.xl },
+  filterRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.md },
+  chips: { paddingRight: spacing.xl, gap: spacing.sm, alignItems: 'center' },
+  chipDivider: { width: 1, height: 20, backgroundColor: colors.border, marginHorizontal: 2 },
+
+  toggle: {
+    flexDirection: 'row',
+    gap: 2,
+    marginLeft: spacing.xl,
+    padding: 3,
     borderRadius: radius.md,
+    backgroundColor: colors.surfaceMuted,
     borderWidth: 1,
     borderColor: colors.border,
-    paddingHorizontal: spacing.md,
-    height: 44,
   },
-  searchInput: { flex: 1, fontSize: 15, color: colors.text, paddingVertical: 0 },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  listContent: { paddingHorizontal: spacing.xl, paddingBottom: spacing.xxl, flexGrow: 1 },
-  footer: { paddingVertical: spacing.lg },
+  toggleButton: { width: 32, height: 26, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm },
+  toggleActive: { backgroundColor: colors.surface },
 
-  card: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    padding: spacing.md + 2,
-    marginBottom: spacing.sm + 2,
-    ...cardShadow,
-  },
-  cardIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: radius.md,
-    backgroundColor: colors.primarySoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cardMain: { flex: 1, gap: 2 },
-  cardEnd: { alignItems: 'flex-end' },
-  productName: { fontSize: 14, fontWeight: '700', color: colors.text },
-  productMeta: { fontSize: 12, color: colors.textMuted },
-  tags: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 },
-  tag: {
-    fontSize: 10,
-    fontWeight: '700',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: radius.sm,
-    overflow: 'hidden',
-  },
-  tagInactive: { color: colors.textMuted, backgroundColor: colors.surfaceMuted },
-  tagScheme: { color: colors.success, backgroundColor: colors.successSoft },
-  tagDiscount: { color: colors.warning, backgroundColor: colors.warningSoft },
-  price: { fontSize: 15, fontWeight: '700', color: colors.text },
-  mrp: { fontSize: 11, color: colors.textMuted, marginTop: 2 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  listContent: { paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.xxl, flexGrow: 1 },
+  column: { gap: spacing.md },
+  footer: { paddingVertical: spacing.lg },
 });
