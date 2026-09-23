@@ -104,8 +104,15 @@ type SelectedCustomer = Pick<Customer | OrderCustomer, 'id' | 'name' | 'code' | 
 // A NEW order still saves with no connection: it goes to the offline queue
 // (lib/syncService) and is sent when the device is back online. Editing a
 // saved draft needs the server, since the draft lives there.
-export function CreateOrderScreen({ draftId }: { draftId?: string }) {
+// `reorderFrom` starts a NEW order from a previous one (PROJECT_SPEC.md §4
+// "Re-order"): same customer and quantities, today's prices, discounts and
+// schemes. The previous order itself is never touched.
+export function CreateOrderScreen({ draftId, reorderFrom }: { draftId?: string; reorderFrom?: string }) {
   const isEditing = Boolean(draftId);
+  const reorderId = isEditing ? undefined : reorderFrom;
+  // The order the form is filled from, if any: the draft being edited or
+  // the order being repeated.
+  const sourceId = draftId ?? reorderId;
   const online = useIsOnline();
   // Loads the every-5th-order interstitial in the background now, so it's
   // ready by the time a qualifying order's receipt is closed.
@@ -138,22 +145,24 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
   const [productPickerOpen, setProductPickerOpen] = useState(false);
 
   // Loading an existing draft (edit mode only).
-  const [loadStatus, setLoadStatus] = useState<'loading' | 'ready' | 'error'>(isEditing ? 'loading' : 'ready');
+  const [loadStatus, setLoadStatus] = useState<'loading' | 'ready' | 'error'>(sourceId ? 'loading' : 'ready');
+  // The order number being repeated, for the banner.
+  const [reorderedNumber, setReorderedNumber] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [notDraft, setNotDraft] = useState<OrderDetail | null>(null);
   const [repricedProducts, setRepricedProducts] = useState<string[]>([]);
   const [unavailableProducts, setUnavailableProducts] = useState<string[]>([]);
 
   const loadDraft = useCallback(async () => {
-    if (!draftId) return;
+    if (!sourceId) return;
     setLoadStatus('loading');
     setLoadError(null);
     setNotDraft(null);
     try {
-      const { order } = await getOrder(draftId);
+      const { order } = await getOrder(sourceId);
 
       // Submitted orders are not editable.
-      if (order.status !== 'draft') {
+      if (!reorderId && order.status !== 'draft') {
         setNotDraft(order);
         setLoadStatus('ready');
         return;
@@ -175,6 +184,12 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
           unavailable.push(item.productName);
           continue;
         }
+        if (reorderId) {
+          // A re-order is a new order at today's terms: the product's current
+          // discount, not the one the old order was placed at.
+          nextLines.push({ product, quantity: String(item.paidQty), discount: String(product.discount) });
+          continue;
+        }
         if (hasRepriced(item, product)) repriced.push(product.name);
         // The SAVED discount is kept, not reset to the product's current one.
         nextLines.push({ product, quantity: String(item.paidQty), discount: String(item.discount) });
@@ -182,7 +197,9 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
 
       setCustomer(order.customer ?? null);
       setLines(nextLines);
-      setRemarks(order.remarks ?? '');
+      // A re-order's remarks start empty - they were about the old delivery.
+      setRemarks(reorderId ? '' : (order.remarks ?? ''));
+      setReorderedNumber(reorderId ? order.orderNumber : null);
       setRepricedProducts(repriced);
       setUnavailableProducts(unavailable);
       setLoadStatus('ready');
@@ -190,7 +207,7 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
       setLoadError(err instanceof Error ? err.message : 'Something went wrong.');
       setLoadStatus('error');
     }
-  }, [draftId]);
+  }, [sourceId, reorderId]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -295,6 +312,7 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
     setRemarks('');
     setValidationError(null);
     setError(null);
+    setReorderedNumber(null);
   }
 
   function confirmClear() {
@@ -463,17 +481,22 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
   }
 
   // --- Edit-mode load states -----------------------------------------
-  if (isEditing && loadStatus === 'loading') {
+  if (sourceId && loadStatus === 'loading') {
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={styles.muted}>Loading draft…</Text>
+        <Text style={styles.muted}>{reorderId ? 'Loading the previous order…' : 'Loading draft…'}</Text>
       </View>
     );
   }
 
-  if (isEditing && loadStatus === 'error') {
-    return <ErrorState message={`Could not load this draft: ${loadError}`} onRetry={loadDraft} />;
+  if (sourceId && loadStatus === 'error') {
+    return (
+      <ErrorState
+        message={`Could not load ${reorderId ? 'the order to repeat' : 'this draft'}: ${loadError}`}
+        onRetry={loadDraft}
+      />
+    );
   }
 
   if (isEditing && notDraft) {
@@ -559,6 +582,13 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
           {unavailableProducts.length === 1 ? 'A product has' : `${unavailableProducts.length} products have`} been
           deactivated since this draft was saved and {unavailableProducts.length === 1 ? 'was' : 'were'} removed from
           it: {unavailableProducts.join(', ')}. Save the draft to keep this change.
+        </Banner>
+      ) : null}
+
+      {reorderedNumber && !success && !savedOffline ? (
+        <Banner kind="info" onDismiss={() => setReorderedNumber(null)}>
+          <Text style={styles.bold}>Re-ordering {reorderedNumber || 'a previous order'}.</Text> Customer and quantities are
+          copied; today&apos;s prices, discounts and schemes apply. The original order is not changed.
         </Banner>
       ) : null}
 

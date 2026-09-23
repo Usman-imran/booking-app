@@ -7,6 +7,7 @@ import {
   deactivateCustomer,
   findCustomerByCode,
   findCustomerById,
+  listCustomerAreas,
   listCustomers,
   toPublicCustomer,
   updateCustomer,
@@ -141,8 +142,15 @@ router.get(
     }
 
     const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    const cityArea = typeof req.query.cityArea === 'string' ? req.query.cityArea.trim() : '';
 
-    const { rows, total } = await listCustomers(req.user.id, { search: search || undefined, isActive, page, limit });
+    const { rows, total } = await listCustomers(req.user.id, {
+      search: search || undefined,
+      isActive,
+      cityArea: cityArea || undefined,
+      page,
+      limit,
+    });
 
     res.json({
       customers: rows.map(toPublicCustomer),
@@ -153,6 +161,16 @@ router.get(
         totalPages: Math.max(Math.ceil(total / limit), 1),
       },
     });
+  })
+);
+
+// GET /api/customers/areas - the city/areas in use, for the area filter:
+// { areas: [{ area, customers }] }. Registered before /:id so "areas"
+// isn't read as a customer id.
+router.get(
+  '/areas',
+  asyncHandler(async (req, res) => {
+    res.json({ areas: await listCustomerAreas(req.user.id) });
   })
 );
 

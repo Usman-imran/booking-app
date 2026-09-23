@@ -30,7 +30,7 @@ export type CustomerInput = {
   customerType: string;
 };
 
-export type ListCustomersParams = { page?: number; limit?: number; search?: string; isActive?: boolean };
+export type ListCustomersParams = { page?: number; limit?: number; search?: string; isActive?: boolean; cityArea?: string };
 
 export function listCustomers(
   params: ListCustomersParams = {}
@@ -40,8 +40,15 @@ export function listCustomers(
   if (params.limit) query.set('limit', String(params.limit));
   if (params.search) query.set('search', params.search);
   if (params.isActive !== undefined) query.set('isActive', String(params.isActive));
+  if (params.cityArea) query.set('cityArea', params.cityArea);
   const suffix = query.toString();
   return apiClient.get(`/customers${suffix ? `?${suffix}` : ''}`);
+}
+
+// The city/areas the customers are in, most customers first - the area
+// filter's chips.
+export function listCustomerAreas(): Promise<{ areas: { area: string; customers: number }[] }> {
+  return apiClient.get('/customers/areas');
 }
 
 export function getCustomer(id: string): Promise<{ customer: Customer }> {

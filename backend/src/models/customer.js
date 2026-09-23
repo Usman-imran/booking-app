@@ -94,7 +94,7 @@ export async function deactivateCustomer(ownerId, id) {
   return rows[0] || null;
 }
 
-export async function listCustomers(ownerId, { search, isActive, page, limit }) {
+export async function listCustomers(ownerId, { search, isActive, cityArea, page, limit }) {
   const params = [ownerId];
   const conditions = ['owner_id = $1'];
 
@@ -105,7 +105,13 @@ export async function listCustomers(ownerId, { search, isActive, page, limit }) 
 
   if (typeof isActive === 'boolean') {
     params.push(isActive);
-    conditions.push(`is_active = $${params.length}`);
+    conditions.push(`is_active = ${params.length}`);
+  }
+
+  // Exact area, case- and space-insensitive: "Gulberg" matches " gulberg".
+  if (cityArea) {
+    params.push(cityArea);
+    conditions.push(`lower(btrim(city_area)) = lower(btrim(${params.length}))`);
   }
 
   const whereClause = `WHERE ${conditions.join(' AND ')}`;
@@ -122,6 +128,20 @@ export async function listCustomers(ownerId, { search, isActive, page, limit }) 
   );
 
   return { rows, total };
+}
+
+// The distinct city/areas this account's customers are in, with how many
+// customers each, for the area filter. Spelled as most customers spell it.
+export async function listCustomerAreas(ownerId) {
+  const { rows } = await pool.query(
+    `SELECT mode() WITHIN GROUP (ORDER BY btrim(city_area)) AS area, COUNT(*)::int AS customers
+       FROM customers
+      WHERE owner_id = $1 AND city_area IS NOT NULL AND btrim(city_area) <> ''
+      GROUP BY lower(btrim(city_area))
+      ORDER BY customers DESC, area ASC`,
+    [ownerId]
+  );
+  return rows;
 }
 
 export function toPublicCustomer(customer) {
