@@ -6,6 +6,7 @@ import { Banner } from '@/components/form/Banner';
 import { Button } from '@/components/form/Button';
 import { Field } from '@/components/form/Field';
 import { FormScreen } from '@/components/form/FormScreen';
+import { ReceiptLogoCard } from '@/components/settings/ReceiptLogoCard';
 import { updateCompanyProfile } from '@/lib/api/auth';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { cardShadow, colors, radius, spacing } from '@/lib/theme';
@@ -112,6 +113,8 @@ export function SettingsScreen() {
           style={styles.save}
         />
       </View>
+
+      <ReceiptLogoCard />
 
       <DetailCard
         title="Signed in as"

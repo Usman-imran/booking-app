@@ -2,7 +2,15 @@ import { Router } from 'express';
 import asyncHandler from '../utils/asyncHandler.js';
 import ApiError from '../utils/ApiError.js';
 import authenticate from '../middleware/authenticate.js';
-import { createUser, findUserByUsername, setCompanyProfile, toPublicUser } from '../models/user.js';
+import {
+  createUser,
+  findUserByUsername,
+  findUserProfileById,
+  setCompanyProfile,
+  setLogo,
+  toPublicUser,
+} from '../models/user.js';
+import { getPlanSummary, isPro } from '../utils/plan.js';
 import { hashPassword, verifyPassword } from '../utils/password.js';
 import { signAuthToken } from '../utils/jwt.js';
 
@@ -130,9 +138,25 @@ router.post(
   })
 );
 
-router.get('/me', authenticate, (req, res) => {
-  res.json({ user: toPublicUser(req.user) });
-});
+router.get(
+  '/me',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    // Re-read with the logo, which the per-request auth lookup leaves out.
+    const user = await findUserProfileById(req.user.id);
+    res.json({ user: toPublicUser(user ?? req.user) });
+  })
+);
+
+// GET /api/auth/plan - the account's plan and today's usage against it:
+// { plan, proUntil, dailyOrderLimit (null = unlimited), ordersToday, resetsAt }
+router.get(
+  '/plan',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    res.json(await getPlanSummary(req.user));
+  })
+);
 
 // PUT /api/auth/company — rename the business and/or set its tagline.
 // Body: { companyName, tagline? } — a missing, null or blank tagline clears
@@ -172,6 +196,35 @@ router.put(
     // RETURNING gives back what is actually stored, rather than patching
     // the cached request user.
     const user = await setCompanyProfile(req.user.id, { companyName, tagline });
+    res.json({ user: toPublicUser(user) });
+  })
+);
+
+// A logo is a small image data URI; the app resizes it to 256px first.
+const LOGO_RE = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+=*$/;
+const LOGO_MAX_LENGTH = 300000;
+
+// PUT /api/auth/logo - set the receipt logo. Body: { logo } - a data URI,
+// or null to remove it. A Pro feature: a Free account gets 402, the same
+// status the order limit uses, so the app shows the upgrade screen.
+router.put(
+  '/logo',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const logo = req.body?.logo ?? null;
+    if (logo !== null) {
+      if (!isPro(req.user)) {
+        throw new ApiError(402, 'A custom receipt logo is a Pro feature.', { code: 'PRO_REQUIRED' });
+      }
+      if (typeof logo !== 'string' || !LOGO_RE.test(logo)) {
+        throw new ApiError(400, 'logo must be a PNG, JPEG or WebP image.');
+      }
+      if (logo.length > LOGO_MAX_LENGTH) {
+        throw new ApiError(400, 'That logo is too large. Choose a smaller image.');
+      }
+    }
+    // Removing is always allowed, Pro or not.
+    const user = await setLogo(req.user.id, logo);
     res.json({ user: toPublicUser(user) });
   })
 );

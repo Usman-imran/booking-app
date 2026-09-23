@@ -13,6 +13,7 @@ import { OrderReceiptModal } from '@/components/orders/OrderReceiptModal';
 import { ProductPickerModal } from '@/components/orders/ProductPickerModal';
 import { PressableScale } from '@/components/PressableScale';
 import { SyncStatusBar } from '@/components/SyncStatusBar';
+import { PaywallModal } from '@/components/subscription/PaywallModal';
 import { NetworkError } from '@/lib/api/client';
 import type { Customer } from '@/lib/api/customers';
 import {
@@ -30,6 +31,9 @@ import { isOnline, useIsOnline } from '@/lib/offline/network';
 import { recordOrderPlaced, showInterstitialIfDue, useInterstitialPreload } from '@/lib/admobInterstitial';
 import { applicableScheme, calculateLine, calculateTotals, formatScheme } from '@/lib/orderCalc';
 import { onOrderSynced, queueOrder } from '@/lib/syncService';
+import { useAuth } from '@/lib/auth/AuthContext';
+import { usePlan } from '@/lib/plan';
+import { isDailyLimitError, markLimitReached, useDailyUsage } from '@/lib/usageTracker';
 import { cardShadow, colors, formatMoney, radius, spacing } from '@/lib/theme';
 
 // Mirrors the backend's own caps so the booker is told before a request is
@@ -106,6 +110,13 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
   // Loads the every-5th-order interstitial in the background now, so it's
   // ready by the time a qualifying order's receipt is closed.
   useInterstitialPreload();
+  // The Free plan's daily cap on new orders. Checked here so the booker
+  // meets the paywall before filling in an order that can't be saved; the
+  // server enforces it regardless (and its 402 opens the same paywall).
+  const { user } = useAuth();
+  const { isPro } = usePlan();
+  const usage = useDailyUsage(user?.id ?? null, isPro);
+  const [paywallOpen, setPaywallOpen] = useState(false);
 
   const [customer, setCustomer] = useState<SelectedCustomer | null>(null);
   const [lines, setLines] = useState<Line[]>([]);
@@ -338,6 +349,7 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
     });
     setSavedOffline({ clientRef, status, reason, customerName: customer!.name, itemCount: lines.length, total: totals.total });
     resetForm();
+    usage.record();
     // Counts towards the every-5th-order ad, but can't earn one: there's no
     // receipt to close until it syncs.
     if (status === 'submitted') recordOrderPlaced(null);
@@ -355,6 +367,13 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
       return;
     }
     setValidationError(null);
+
+    // Only NEW orders count: saving or submitting an existing draft
+    // creates nothing.
+    if (!isEditing && usage.limitReached) {
+      setPaywallOpen(true);
+      return;
+    }
 
     // Exactly the web payload: customer, remarks, and per line the product,
     // quantity and discount. Everything else is the server's to decide.
@@ -394,6 +413,7 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
         }
         setSuccess(data.order);
         resetForm();
+        usage.record();
         // A submitted order goes straight to the share sheet; a draft has
         // no order number yet, so there is nothing to share.
         if (status === 'submitted') {
@@ -423,6 +443,13 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
       // a draft ends the same way as submitting a new order.
       router.replace({ pathname: '/orders/[id]', params: { id: draftId!, share: '1' } });
     } catch (err) {
+      // The server counted differently (orders from another phone, say):
+      // the day is used up. Nothing was saved; the form is still filled in.
+      if (isDailyLimitError(err)) {
+        if (user) markLimitReached(user.id);
+        setPaywallOpen(true);
+        return;
+      }
       setError(
         isEditing && err instanceof NetworkError
           ? 'Could not reach the server. A saved draft can only be changed online - your edits are still on screen, so try again once you are connected.'
@@ -472,6 +499,24 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
   return (
     <FormScreen>
       <SyncStatusBar />
+
+      {!isEditing && usage.remaining !== null && usage.remaining <= 5 ? (
+        <Pressable
+          onPress={() => setPaywallOpen(true)}
+          style={({ pressed }) => [styles.usage, usage.limitReached && styles.usageDone, pressed && { opacity: 0.8 }]}>
+          <Ionicons
+            name={usage.limitReached ? 'lock-closed' : 'speedometer-outline'}
+            size={16}
+            color={usage.limitReached ? colors.danger : colors.warning}
+          />
+          <Text style={styles.usageText}>
+            {usage.limitReached
+              ? `Daily limit reached - ${usage.limit} of ${usage.limit} free orders used today.`
+              : `${usage.remaining} of ${usage.limit} free orders left today.`}
+          </Text>
+          <Text style={styles.usageCta}>Go Pro</Text>
+        </Pressable>
+      ) : null}
 
       {savedOffline ? (
         <Banner kind="info" onDismiss={() => setSavedOffline(null)}>
@@ -735,6 +780,7 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
           showInterstitialIfDue(closedOrderId);
         }}
       />
+      <PaywallModal visible={paywallOpen} reason="order_limit" onClose={() => setPaywallOpen(false)} />
     </FormScreen>
   );
 }
@@ -750,6 +796,19 @@ function SummaryRow({ label, value, highlight }: { label: string; value: string;
 
 const styles = StyleSheet.create({
   flex1: { flex: 1 },
+  usage: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.warningSoft,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    marginBottom: spacing.md,
+  },
+  usageDone: { backgroundColor: colors.dangerSoft },
+  usageText: { flex: 1, fontSize: 13, color: colors.text },
+  usageCta: { fontSize: 13, fontWeight: '800', color: colors.primary },
   center: {
     flex: 1,
     alignItems: 'center',

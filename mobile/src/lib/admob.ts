@@ -144,8 +144,20 @@ export function initAds(): Promise<AdsStatus> {
   return startPromise;
 }
 
-export function getAdsStatus() {
-  return status;
+// Pro accounts are ad-free. Set from the signed-in user's plan (tabs
+// layout); while on, every ad reads as unavailable - banners collapse and
+// interstitials are neither loaded nor shown - without touching consent or
+// the SDK, so ads come back at once if the plan lapses.
+let adFree = false;
+
+export function setAdFree(next: boolean) {
+  if (adFree === next) return;
+  adFree = next;
+  listeners.forEach((listener) => listener());
+}
+
+export function getAdsStatus(): AdsStatus {
+  return adFree ? 'unavailable' : status;
 }
 
 function subscribe(listener: () => void) {

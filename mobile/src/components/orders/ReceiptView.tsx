@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
+import { Image, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
 
 import { RECEIPT_COLORS as C, type Receipt, type ReceiptLine } from '@/lib/receipt/receiptData';
 import { formatMoney } from '@/lib/theme';
@@ -141,9 +141,12 @@ export function ReceiptView({
   return (
     <View onLayout={onLayout} style={styles.receipt}>
       <View style={styles.header}>
-        <View style={styles.flex1}>
-          <Text style={styles.brand}>{receipt.brandName}</Text>
-          {receipt.brandTagline ? <Text style={styles.tagline}>{receipt.brandTagline}</Text> : null}
+        <View style={[styles.flex1, styles.brandRow]}>
+          {receipt.logo ? <Image source={{ uri: receipt.logo }} style={styles.logo} resizeMode="contain" /> : null}
+          <View style={styles.flex1}>
+            <Text style={styles.brand}>{receipt.brandName}</Text>
+            {receipt.brandTagline ? <Text style={styles.tagline}>{receipt.brandTagline}</Text> : null}
+          </View>
         </View>
         <View style={styles.headerRight}>
           <Text style={styles.number}>{receipt.orderNumber || 'DRAFT'}</Text>
@@ -264,6 +267,9 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 22,
   },
+  brandRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  // The template's white tile, so a dark logo still shows on the navy.
+  logo: { width: 40, height: 40, borderRadius: 6, backgroundColor: C.white, padding: 3 },
   brand: {
     fontSize: 18,
     fontWeight: '700',

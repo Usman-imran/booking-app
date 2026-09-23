@@ -45,7 +45,9 @@ app.use(
     },
   })
 );
-app.use(express.json());
+// Raised from the 100kb default for the receipt logo (a data URI of up to
+// 300k characters, see PUT /api/auth/logo).
+app.use(express.json({ limit: '512kb' }));
 
 app.use('/api', apiRouter);
 

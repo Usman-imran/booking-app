@@ -1,10 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Redirect, Tabs } from 'expo-router';
 import { BottomTabBar, type BottomTabBarProps } from 'expo-router/tabs';
+import { useEffect } from 'react';
 import { ActivityIndicator, Platform, StyleSheet, View, type ColorValue } from 'react-native';
 
 import { AdBanner } from '@/components/AdBanner';
+import { setAdFree } from '@/lib/admob';
 import { useAuth } from '@/lib/auth/AuthContext';
+import { isProUser } from '@/lib/plan';
 import { colors } from '@/lib/theme';
 
 type IconName = keyof typeof Ionicons.glyphMap;
@@ -36,6 +39,12 @@ function TabBarWithBanner(props: BottomTabBarProps) {
 // counterpart of the former web frontend's ProtectedRoute.
 export default function TabsLayout() {
   const { user, isLoading } = useAuth();
+  // Pro is ad-free: the banner below and the every-5th-order interstitial
+  // both switch off (and back on if the subscription lapses).
+  const isPro = isProUser(user);
+  useEffect(() => {
+    setAdFree(isPro);
+  }, [isPro]);
 
   if (isLoading) {
     return (

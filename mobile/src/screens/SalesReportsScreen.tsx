@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { ActivityIndicator, Alert, FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { DateField, fromIsoDate, toIsoDate } from '@/components/form/DateField';
+import { PaywallModal } from '@/components/subscription/PaywallModal';
 import { getReport, type Report, type ReportRow, type ReportType } from '@/lib/api/reports';
+import { usePlan } from '@/lib/plan';
+import { exportReportCsv } from '@/lib/reportExport';
 import { cardShadow, colors, formatMoney, radius, spacing } from '@/lib/theme';
 
 const PAGE_SIZE = 50;
@@ -97,6 +101,10 @@ export function SalesReportsScreen() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const requestId = useRef(0);
+  // Export is Pro; a Free account gets the paywall instead.
+  const { isPro } = usePlan();
+  const [exporting, setExporting] = useState(false);
+  const [paywallOpen, setPaywallOpen] = useState(false);
 
   const load = useCallback(
     async (mode: 'initial' | 'refresh') => {
@@ -140,6 +148,22 @@ export function SalesReportsScreen() {
       // Scrolling again retries; not worth replacing the report with an error.
     } finally {
       if (id === requestId.current) setIsLoadingMore(false);
+    }
+  }
+
+  async function handleExport() {
+    if (!isPro) {
+      setPaywallOpen(true);
+      return;
+    }
+    setExporting(true);
+    try {
+      // The breakdown and date range on screen, every page of it.
+      await exportReportCsv({ type, dateFrom, dateTo });
+    } catch (err) {
+      Alert.alert('Export failed', err instanceof Error ? err.message : 'Something went wrong.');
+    } finally {
+      setExporting(false);
     }
   }
 
@@ -191,6 +215,23 @@ export function SalesReportsScreen() {
         ))}
       </View>
 
+      <Pressable
+        onPress={handleExport}
+        disabled={exporting || status !== 'ready'}
+        style={({ pressed }) => [styles.export, (pressed || exporting) && { opacity: 0.7 }, status !== 'ready' && styles.exportDisabled]}>
+        {exporting ? (
+          <ActivityIndicator size="small" color={colors.primary} />
+        ) : (
+          <Ionicons name={isPro ? 'download-outline' : 'lock-closed'} size={18} color={colors.primary} />
+        )}
+        <Text style={styles.exportText}>{exporting ? 'Preparing export…' : 'Export to Excel (CSV)'}</Text>
+        {isPro ? null : (
+          <View style={styles.proBadge}>
+            <Text style={styles.proBadgeText}>PRO</Text>
+          </View>
+        )}
+      </Pressable>
+
       {status !== 'error' ? (
         <>
           <View style={styles.summaryGrid}>
@@ -208,6 +249,8 @@ export function SalesReportsScreen() {
           </Text>
         </>
       ) : null}
+
+      <PaywallModal visible={paywallOpen} reason="export" onClose={() => setPaywallOpen(false)} />
 
       {status === 'loading' ? (
         <View style={styles.center}>
@@ -282,6 +325,23 @@ const styles = StyleSheet.create({
   presetActive: { backgroundColor: colors.primarySoft },
   presetText: { fontSize: 12, fontWeight: '600', color: colors.textSecondary },
   presetTextActive: { color: colors.primaryDark },
+  export: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginHorizontal: spacing.xl,
+    marginBottom: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    backgroundColor: colors.surface,
+  },
+  exportDisabled: { borderColor: colors.border },
+  exportText: { flex: 1, fontSize: 14, fontWeight: '700', color: colors.primary },
+  proBadge: { backgroundColor: colors.primary, borderRadius: radius.full, paddingHorizontal: spacing.sm, paddingVertical: 2 },
+  proBadgeText: { color: '#fff', fontSize: 10, fontWeight: '800', letterSpacing: 0.8 },
   summaryGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, paddingHorizontal: spacing.xl },
   tile: {
     flexBasis: '30%',

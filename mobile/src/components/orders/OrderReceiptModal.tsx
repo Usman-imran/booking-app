@@ -10,6 +10,7 @@ import { ReceiptImageRenderer } from './ReceiptImageRenderer';
 import { ReceiptPreview } from './ReceiptView';
 import { getOrder, type OrderDetail } from '@/lib/api/orders';
 import { useAuth } from '@/lib/auth/AuthContext';
+import { isProUser } from '@/lib/plan';
 import { buildReceipt, type Receipt } from '@/lib/receipt/receiptData';
 import { exportReceiptJpg, exportReceiptPdf, shareReceiptFile, type ReceiptFormat } from '@/lib/receipt/shareReceipt';
 import { colors, spacing } from '@/lib/theme';
@@ -79,9 +80,16 @@ export function OrderReceiptModal({ visible, onClose, order: providedOrder, orde
   const receipt = useMemo(
     () =>
       order
-        ? buildReceipt(order, { companyName: user?.companyName, tagline: user?.tagline, bookerName: user?.name })
+        ? buildReceipt(order, {
+            companyName: user?.companyName,
+            tagline: user?.tagline,
+            bookerName: user?.name,
+            // Pro only; re-checked here so a user cached from before their
+            // month ran out stops printing it.
+            logo: isProUser(user) ? user?.logo : null,
+          })
         : null,
-    [order, user?.companyName, user?.tagline, user?.name]
+    [order, user]
   );
 
   // Mounts the renderer and waits for its one reply.

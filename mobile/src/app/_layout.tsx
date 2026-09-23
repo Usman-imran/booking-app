@@ -52,6 +52,7 @@ export default function RootLayout() {
           <Stack.Screen name="reports" options={{ headerShown: true }} />
           <Stack.Screen name="targets" options={{ headerShown: true }} />
           <Stack.Screen name="settings" options={{ headerShown: true }} />
+          <Stack.Screen name="subscription" options={{ headerShown: true }} />
         </Stack>
       </AuthProvider>
     </SafeAreaProvider>

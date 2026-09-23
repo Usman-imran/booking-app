@@ -66,6 +66,12 @@ const STYLES = `
     color: ${C.white};
     padding: 12px 22px;
   }
+  .receipt-brand-row { display: flex; align-items: center; gap: 10px; }
+  /* A white tile, so a dark or transparent logo still shows on the navy. */
+  .receipt-logo {
+    width: 40px; height: 40px; border-radius: 6px; background: ${C.white};
+    padding: 3px; object-fit: contain; flex-shrink: 0;
+  }
   .receipt-brand { font-size: 18px; font-weight: 700; letter-spacing: 0.01em; line-height: 1.2; }
   .receipt-tagline { font-size: 10.5px; color: ${C.headerMuted}; margin-top: 2px; }
   .receipt-header-right { text-align: right; }
@@ -252,9 +258,12 @@ export function buildReceiptHtml(receipt: Receipt, mode: ReceiptRenderMode = 'pd
 <body class="${mode}">
   <div class="receipt">
     <div class="receipt-header">
-      <div>
-        <div class="receipt-brand">${escapeHtml(receipt.brandName)}</div>
-        ${receipt.brandTagline ? `<div class="receipt-tagline">${escapeHtml(receipt.brandTagline)}</div>` : ''}
+      <div class="receipt-brand-row">
+        ${receipt.logo ? `<img class="receipt-logo" src="${escapeHtml(receipt.logo)}" alt="" />` : ''}
+        <div>
+          <div class="receipt-brand">${escapeHtml(receipt.brandName)}</div>
+          ${receipt.brandTagline ? `<div class="receipt-tagline">${escapeHtml(receipt.brandTagline)}</div>` : ''}
+        </div>
       </div>
       <div class="receipt-header-right">
         <div class="receipt-number">${escapeHtml(receipt.orderNumber || 'DRAFT')}</div>

@@ -118,8 +118,10 @@ function safeLoad() {
 // or on its way.
 export function preloadInterstitial() {
   // Waits for consent + SDK start-up; requests nothing if ads can't run.
-  initAds().then((status) => {
-    if (status !== 'ready') return;
+  initAds().then(() => {
+    // getAdsStatus(), not the start-up result: it is also 'unavailable'
+    // for an ad-free (Pro) account.
+    if (getAdsStatus() !== 'ready') return;
     ad ??= createAd();
     loadRetries = 0;
     safeLoad();

@@ -49,6 +49,8 @@ export type ReceiptLine = {
 export type Receipt = {
   brandName: string;
   brandTagline: string;
+  // The account's logo as an image data URI (a Pro feature), or null.
+  logo: string | null;
   orderNumber: string;
   status: OrderDetail['status'];
   statusLabel: string;
@@ -89,7 +91,13 @@ export function buildReceipt(
     companyName,
     tagline,
     bookerName,
-  }: { companyName?: string | null; tagline?: string | null; bookerName?: string | null } = {}
+    logo,
+  }: {
+    companyName?: string | null;
+    tagline?: string | null;
+    bookerName?: string | null;
+    logo?: string | null;
+  } = {}
 ): Receipt {
   const lines: ReceiptLine[] = order.items.map((item, index) => ({
     id: item.id,
@@ -116,6 +124,9 @@ export function buildReceipt(
   return {
     brandName,
     brandTagline: brandTagline.toLowerCase() === brandName.toLowerCase() ? '' : brandTagline,
+    // Only ever an image data URI: it is written into the HTML template
+    // as an <img src>, so nothing else may pass.
+    logo: logo && /^data:image\/(png|jpeg|webp);base64,/.test(logo) ? logo : null,
     orderNumber: order.orderNumber,
     status: order.status,
     statusLabel: order.status === 'submitted' ? 'Submitted' : order.status === 'cancelled' ? 'Cancelled' : 'Draft',

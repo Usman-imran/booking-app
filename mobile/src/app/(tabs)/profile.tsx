@@ -9,6 +9,7 @@ import { PressableScale } from '@/components/PressableScale';
 import { isAdPrivacyOptionsRequired, showAdPrivacyOptions, useAdsStatus } from '@/lib/admob';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { usePendingOrders } from '@/lib/offline/offlineQueue';
+import { PRO_PRICE_LABEL, PRO_PRICE_PERIOD, usePlan } from '@/lib/plan';
 import { cardShadow, colors, formatDate, radius, spacing } from '@/lib/theme';
 
 type IconName = keyof typeof Ionicons.glyphMap;
@@ -42,6 +43,7 @@ function LinkRow({ icon, label, onPress, last }: { icon: IconName; label: string
 export default function Profile() {
   const { user, logout } = useAuth();
   const pendingOrders = usePendingOrders();
+  const { isPro, proUntil } = usePlan();
   // Users who were shown Google's ad-consent form (EEA/UK etc.) must be able
   // to change their answer later; everyone else never sees this row.
   const adsStatus = useAdsStatus();
@@ -97,6 +99,22 @@ export default function Profile() {
           <InfoRow icon="calendar-outline" label="Member since" value={formatDate(user.createdAt)} />
         </View>
 
+        {/* The plan, and the way to Pro. */}
+        <PressableScale style={[styles.planCard, isPro && styles.planCardPro]} onPress={() => router.push('/subscription')}>
+          <View style={[styles.planIcon, isPro && styles.planIconPro]}>
+            <Ionicons name={isPro ? 'ribbon' : 'rocket-outline'} size={22} color={isPro ? '#fff' : colors.primary} />
+          </View>
+          <View style={styles.planText}>
+            <Text style={[styles.planTitle, isPro && styles.onPro]}>{isPro ? 'Pro plan' : 'Upgrade to Pro'}</Text>
+            <Text style={[styles.planMeta, isPro && styles.onProMuted]}>
+              {isPro
+                ? proUntil ? `Active until ${formatDate(proUntil)}` : 'Active'
+                : `Unlimited orders, logo on receipts, exports, no ads · ${PRO_PRICE_LABEL} ${PRO_PRICE_PERIOD}`}
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={isPro ? '#fff' : colors.textMuted} />
+        </PressableScale>
+
         <Text style={styles.sectionTitle}>Manage</Text>
         <View style={styles.card}>
           <LinkRow icon="people-outline" label="Customers" onPress={() => router.push('/customers')} />
@@ -122,6 +140,32 @@ export default function Profile() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
   content: { padding: spacing.xl, paddingBottom: spacing.xxl },
+  planCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    backgroundColor: colors.primarySoft,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    padding: spacing.lg,
+    marginTop: spacing.lg,
+  },
+  planCardPro: { backgroundColor: colors.primary },
+  planIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: radius.full,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  planIconPro: { backgroundColor: 'rgba(255,255,255,0.2)' },
+  planText: { flex: 1, gap: 2 },
+  planTitle: { fontSize: 15, fontWeight: '800', color: colors.primaryDark },
+  planMeta: { fontSize: 12, color: colors.textSecondary, lineHeight: 17 },
+  onPro: { color: '#fff' },
+  onProMuted: { color: '#dceaff' },
   hero: { alignItems: 'center', paddingVertical: spacing.xl, gap: spacing.xs },
   name: { fontSize: 22, fontWeight: '700', color: colors.text, marginTop: spacing.md },
   username: { fontSize: 14, color: colors.textMuted },

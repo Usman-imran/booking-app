@@ -39,11 +39,15 @@ function backoffDelay(attempts: number) {
 
 // The server looked at the order and refused it (customer or product
 // deactivated meanwhile, a validation rule). Resending the same body gets
-// the same answer, so it's parked for the booker. 401 (session), 408, 429
-// and 5xx are about the moment, not the order, and are retried.
+// the same answer, so it's parked for the booker. 401 (session), 402 (the
+// Free plan's daily order limit - it passes at midnight or on upgrading),
+// 408, 429 and 5xx are about the moment, not the order, and are retried.
 function isRejection(err: unknown) {
   return (
-    err instanceof ApiRequestError && err.status >= 400 && err.status < 500 && ![401, 408, 429].includes(err.status)
+    err instanceof ApiRequestError &&
+    err.status >= 400 &&
+    err.status < 500 &&
+    ![401, 402, 408, 429].includes(err.status)
   );
 }
 

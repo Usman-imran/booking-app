@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import asyncHandler from '../utils/asyncHandler.js';
 import ApiError from '../utils/ApiError.js';
+import { FREE_DAILY_ORDER_LIMIT, getDailyOrderUsage, isPro } from '../utils/plan.js';
 import authenticate from '../middleware/authenticate.js';
 import { ORDER_NUMBER_EXHAUSTED } from '../utils/orderNumber.js';
 import {
@@ -237,6 +238,22 @@ router.post(
       const existingId = await findOrderIdByClientRef(req.user.id, clientRef);
       if (existingId) {
         return replayOrder(res, req.user.id, existingId);
+      }
+    }
+
+    // The Free plan's daily cap on new orders (utils/plan.js). After the
+    // replay above, so a retried order that already exists is never
+    // refused. 402 with a code the app recognises and answers with the
+    // upgrade screen. Two creates racing at order #20 can both pass - one
+    // order over a soft commercial limit isn't worth a lock on every create.
+    if (!isPro(req.user)) {
+      const { ordersToday } = await getDailyOrderUsage(req.user.id);
+      if (ordersToday >= FREE_DAILY_ORDER_LIMIT) {
+        throw new ApiError(
+          402,
+          `The Free plan allows ${FREE_DAILY_ORDER_LIMIT} new orders a day. Upgrade to Pro for unlimited orders.`,
+          { code: 'DAILY_LIMIT_REACHED', limit: FREE_DAILY_ORDER_LIMIT }
+        );
       }
     }
 
