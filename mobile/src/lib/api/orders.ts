@@ -83,8 +83,19 @@ export type OrderLineInput = { productId: string; quantity: number; discount: nu
 
 export type OrderInput = { customerId: string; remarks: string | null; items: OrderLineInput[] };
 
-export function createOrder(input: OrderInput & { status: 'draft' | 'submitted' }): Promise<{ order: OrderDetail }> {
-  return apiClient.post('/orders', input);
+export type CreateOrderInput = OrderInput & {
+  status: 'draft' | 'submitted';
+  // Idempotency key: a UUID generated once per order and resent on every
+  // attempt. A repeat POST gets the order the first one created (status
+  // 200, `replayed: true`) instead of booking it twice.
+  clientRef?: string;
+};
+
+export function createOrder(
+  input: CreateOrderInput,
+  options?: { timeoutMs?: number }
+): Promise<{ order: OrderDetail; replayed?: boolean }> {
+  return apiClient.post('/orders', input, options);
 }
 
 // Replaces a draft's contents. Same body as createOrder minus `status` - an

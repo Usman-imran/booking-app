@@ -118,7 +118,13 @@ async function buildOrderContents(client, { ownerId, customerId, items }) {
   return { lines, totals };
 }
 
-export async function createOrderWithItems({ customerId, bookerId, status, remarks, items }) {
+//
+// `clientRef`: optional idempotency key sent by the app (see the
+// add-client-ref-to-orders migration). A repeat trips the
+// orders_booker_client_ref_key constraint - rolling back everything above,
+// the reserved order number included - and the route replays the existing
+// order instead.
+export async function createOrderWithItems({ customerId, bookerId, status, remarks, items, clientRef }) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -132,12 +138,12 @@ export async function createOrderWithItems({ customerId, bookerId, status, remar
     const orderNumber = status === 'submitted' ? await reserveNextOrderNumber(client, bookerId) : null;
 
     const { rows: orderRows } = await client.query(
-      `INSERT INTO orders (order_number, customer_id, booker_id, status, remarks, subtotal, discount_total, total, submitted_at)
+      `INSERT INTO orders (order_number, customer_id, booker_id, status, remarks, subtotal, discount_total, total, submitted_at, client_ref)
        -- $4 is explicitly cast because it is used both as a varchar column
        -- value and in a text comparison, which PostgreSQL will not infer a
        -- single type for. submitted_at uses the database clock, so it can
        -- never disagree with the order number reserved above.
-       VALUES ($1, $2, $3, $4::text, $5, $6, $7, $8, CASE WHEN $4::text = 'submitted' THEN now() ELSE NULL END)
+       VALUES ($1, $2, $3, $4::text, $5, $6, $7, $8, CASE WHEN $4::text = 'submitted' THEN now() ELSE NULL END, $9)
        RETURNING ${SELECT_FIELDS}`,
       [
         orderNumber,
@@ -148,6 +154,7 @@ export async function createOrderWithItems({ customerId, bookerId, status, remar
         totals.subtotal,
         totals.discountTotal,
         totals.total,
+        clientRef ?? null,
       ]
     );
     const order = orderRows[0];
@@ -162,6 +169,15 @@ export async function createOrderWithItems({ customerId, bookerId, status, remar
   } finally {
     client.release();
   }
+}
+
+// The id of the booker's order created under this idempotency key, or null.
+export async function findOrderIdByClientRef(ownerId, clientRef) {
+  const { rows } = await pool.query('SELECT id FROM orders WHERE booker_id = $1 AND client_ref = $2', [
+    ownerId,
+    clientRef,
+  ]);
+  return rows[0]?.id ?? null;
 }
 
 export async function findOrderById(ownerId, id) {

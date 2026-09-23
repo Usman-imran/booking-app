@@ -17,6 +17,7 @@ import { EmptyState } from '../EmptyState';
 import { ErrorState } from '../ErrorState';
 import { PressableScale } from '../PressableScale';
 import { listProductCompanies, listProducts, type Product } from '@/lib/api/products';
+import { cachedCompanies, searchCachedProducts, withOfflineFallback } from '@/lib/offline/offlineCache';
 import { formatScheme } from '@/lib/orderCalc';
 import { colors, formatMoney, radius, spacing } from '@/lib/theme';
 
@@ -93,6 +94,10 @@ function QuantityStepper({
 // is on the order its row turns into a quantity stepper, so a quantity of
 // 24 is typed here rather than tapped 24 times or hunted for on the order
 // screen afterwards.
+//
+// Offline, it searches the copy of the catalogue saved on the device.
+// Prices there can be up to a sync behind; the server re-prices the order
+// when it is sent.
 export function ProductPickerModal({ visible, onClose, onAdd, onSetQuantity, cartQuantities, limitReached }: Props) {
   const [input, setInput] = useState('');
   const [search, setSearch] = useState('');
@@ -101,6 +106,7 @@ export function ProductPickerModal({ visible, onClose, onAdd, onSetQuantity, car
   const [products, setProducts] = useState<Product[]>([]);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState<string | null>(null);
+  const [fromCache, setFromCache] = useState(false);
   const requestRef = useRef(0);
 
   useEffect(() => {
@@ -112,9 +118,12 @@ export function ProductPickerModal({ visible, onClose, onAdd, onSetQuantity, car
   useEffect(() => {
     if (!visible) return;
     let cancelled = false;
-    listProductCompanies()
-      .then((data) => {
-        if (!cancelled) setCompanies(data.companies);
+    withOfflineFallback(
+      () => listProductCompanies().then((data) => data.companies),
+      () => cachedCompanies()
+    )
+      .then(({ data }) => {
+        if (!cancelled) setCompanies(data);
       })
       .catch(() => {
         if (!cancelled) setCompanies([]);
@@ -129,15 +138,20 @@ export function ProductPickerModal({ visible, onClose, onAdd, onSetQuantity, car
     setStatus('loading');
     setError(null);
     try {
-      const data = await listProducts({
-        search: search || undefined,
-        company: company || undefined,
-        isActive: true,
-        limit: RESULT_LIMIT,
-        page: 1,
-      });
+      const { data, fromCache: cached } = await withOfflineFallback(
+        () =>
+          listProducts({
+            search: search || undefined,
+            company: company || undefined,
+            isActive: true,
+            limit: RESULT_LIMIT,
+            page: 1,
+          }).then((result) => result.products),
+        () => searchCachedProducts({ search, company, limit: RESULT_LIMIT })
+      );
       if (requestRef.current !== requestId) return;
-      setProducts(data.products);
+      setProducts(data);
+      setFromCache(cached);
       setStatus('ready');
     } catch (err) {
       if (requestRef.current !== requestId) return;
@@ -202,6 +216,12 @@ export function ProductPickerModal({ visible, onClose, onAdd, onSetQuantity, car
               );
             })}
           </ScrollView>
+        ) : null}
+
+        {fromCache && status === 'ready' ? (
+          <Text style={styles.offlineNote}>
+            Offline - searching the catalogue saved on this device. Prices are confirmed when the order syncs.
+          </Text>
         ) : null}
 
         {limitReached ? (
@@ -305,6 +325,7 @@ const styles = StyleSheet.create({
   chipText: { fontSize: 13, fontWeight: '600', color: colors.textSecondary },
   chipTextActive: { color: '#fff' },
   limit: { color: colors.danger, fontSize: 13, paddingHorizontal: spacing.xl, paddingBottom: spacing.sm },
+  offlineNote: { fontSize: 12, color: colors.primaryDark, paddingHorizontal: spacing.xl, paddingBottom: spacing.sm },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   list: { paddingHorizontal: spacing.xl, paddingTop: spacing.xs, paddingBottom: spacing.xxl, flexGrow: 1 },
   row: {

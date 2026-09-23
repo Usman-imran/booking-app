@@ -16,6 +16,7 @@ import { EmptyState } from '../EmptyState';
 import { ErrorState } from '../ErrorState';
 import { PressableScale } from '../PressableScale';
 import { listCustomers, type Customer } from '@/lib/api/customers';
+import { searchCachedCustomers, withOfflineFallback } from '@/lib/offline/offlineCache';
 import { colors, radius, spacing } from '@/lib/theme';
 
 const RESULT_LIMIT = 20;
@@ -25,13 +26,15 @@ type Props = { visible: boolean; onClose: () => void; onSelect: (customer: Custo
 // Step 1 of the order flow: pick the customer. A searchable full-screen
 // list rather than a dropdown - a distributor's customer list is far too
 // long to scroll. Only active customers are offered, because the API
-// refuses to book an order for an inactive one.
+// refuses to book an order for an inactive one. Offline, it searches the
+// copy of the customer list saved on the device instead.
 export function CustomerPickerModal({ visible, onClose, onSelect }: Props) {
   const [input, setInput] = useState('');
   const [search, setSearch] = useState('');
   const [results, setResults] = useState<Customer[]>([]);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState<string | null>(null);
+  const [fromCache, setFromCache] = useState(false);
   // Guards against a slow earlier response landing after a newer one.
   const requestRef = useRef(0);
 
@@ -45,9 +48,16 @@ export function CustomerPickerModal({ visible, onClose, onSelect }: Props) {
     setStatus('loading');
     setError(null);
     try {
-      const data = await listCustomers({ search: search || undefined, isActive: true, limit: RESULT_LIMIT, page: 1 });
+      const { data, fromCache: cached } = await withOfflineFallback(
+        () =>
+          listCustomers({ search: search || undefined, isActive: true, limit: RESULT_LIMIT, page: 1 }).then(
+            (result) => result.customers
+          ),
+        () => searchCachedCustomers({ search, limit: RESULT_LIMIT })
+      );
       if (requestRef.current !== requestId) return;
-      setResults(data.customers);
+      setResults(data);
+      setFromCache(cached);
       setStatus('ready');
     } catch (err) {
       if (requestRef.current !== requestId) return;
@@ -96,6 +106,10 @@ export function CustomerPickerModal({ visible, onClose, onSelect }: Props) {
             </Pressable>
           ) : null}
         </View>
+
+        {fromCache && status === 'ready' ? (
+          <Text style={styles.offlineNote}>Offline - searching the customer list saved on this device.</Text>
+        ) : null}
 
         {status === 'loading' ? (
           <View style={styles.center}>
@@ -174,4 +188,5 @@ const styles = StyleSheet.create({
   rowMain: { flex: 1, gap: 2 },
   rowTitle: { fontSize: 15, fontWeight: '600', color: colors.text },
   rowMeta: { fontSize: 12, color: colors.textMuted },
+  offlineNote: { fontSize: 12, color: colors.primaryDark, paddingHorizontal: spacing.xl, paddingBottom: spacing.sm },
 });

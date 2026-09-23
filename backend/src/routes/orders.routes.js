@@ -8,6 +8,7 @@ import {
   createOrderWithItems,
   deleteDraftOrder,
   findOrderDetailsById,
+  findOrderIdByClientRef,
   listOrders,
   submitOrder,
   toPublicOrder,
@@ -197,19 +198,46 @@ function toOrderDetailsResponse({ order, items }) {
   };
 }
 
+// Answers a repeated create with the order the first attempt made: 200
+// rather than 201, with the same body shape.
+async function replayOrder(res, ownerId, orderId) {
+  const details = await findOrderDetailsById(ownerId, orderId);
+  res.status(200).json({ order: toOrderDetailsResponse(details), replayed: true });
+}
+
 // Create an order — submitted, or saved as a draft with `status: "draft"`.
 //
-// Body: { customerId, status?, remarks?, items: [{ productId, quantity }] }
+// Body: { customerId, status?, remarks?, items: [{ productId, quantity }], clientRef? }
 //
 // The order, its line-item snapshots, its totals and (when submitted) its
 // order number are all written in a single transaction: the whole order is
 // saved or none of it is (PROJECT_SPEC.md §30).
+//
+// `clientRef` is an optional idempotency key (a UUID the app generates per
+// order). The app replays offline orders and retries after lost responses;
+// a POST whose ref already exists returns that order instead of booking it
+// twice.
 router.post(
   '/',
   asyncHandler(async (req, res) => {
     const { data, errors } = validateOrderPayload(req.body ?? {}, { allowStatus: true });
+    const clientRef = req.body?.clientRef ?? null;
+    if (clientRef !== null && (typeof clientRef !== 'string' || !UUID_RE.test(clientRef))) {
+      errors.push('clientRef must be a valid id.');
+    }
     if (errors.length > 0) {
       throw new ApiError(400, errors[0], errors);
+    }
+
+    // Checked BEFORE pricing, not left to the unique constraint alone: a
+    // product deactivated since the first attempt would otherwise fail the
+    // retry with a 400, and the app would report an order that already
+    // exists as rejected.
+    if (clientRef) {
+      const existingId = await findOrderIdByClientRef(req.user.id, clientRef);
+      if (existingId) {
+        return replayOrder(res, req.user.id, existingId);
+      }
     }
 
     let order;
@@ -222,6 +250,7 @@ router.post(
         status: data.status,
         remarks: data.remarks,
         items: data.items,
+        clientRef,
       });
     } catch (err) {
       // 999 orders already exist for today, so no valid ORD-YYYYMMDD-XXX
@@ -230,6 +259,14 @@ router.post(
       // temporary condition rather than a bad request.
       if (err.code === ORDER_NUMBER_EXHAUSTED) {
         throw new ApiError(503, 'The daily order number limit has been reached. Please try again tomorrow.');
+      }
+      // Two attempts with the same ref raced past the lookup above; the
+      // loser rolled back, so answer it with the winner's order.
+      if (err.code === '23505' && err.constraint === 'orders_booker_client_ref_key') {
+        const existingId = await findOrderIdByClientRef(req.user.id, clientRef);
+        if (existingId) {
+          return replayOrder(res, req.user.id, existingId);
+        }
       }
       throw err;
     }

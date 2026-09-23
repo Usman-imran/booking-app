@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from '@/components/Avatar';
 import { PressableScale } from '@/components/PressableScale';
 import { useAuth } from '@/lib/auth/AuthContext';
+import { usePendingOrders } from '@/lib/offline/offlineQueue';
 import { cardShadow, colors, formatDate, radius, spacing } from '@/lib/theme';
 
 type IconName = keyof typeof Ionicons.glyphMap;
@@ -38,9 +39,17 @@ function LinkRow({ icon, label, onPress, last }: { icon: IconName; label: string
 
 export default function Profile() {
   const { user, logout } = useAuth();
+  const pendingOrders = usePendingOrders();
 
   function confirmLogout() {
-    Alert.alert('Sign out', 'Are you sure you want to sign out?', [
+    // Queued orders are kept on the device under this account, but only
+    // sync while it is signed in - worth saying before they go quiet.
+    const pendingNote =
+      pendingOrders.length > 0
+        ? `\n\n${pendingOrders.length} order${pendingOrders.length === 1 ? ' has' : 's have'} not synced yet. ` +
+          'They stay on this device and are sent the next time you sign in to this account.'
+        : '';
+    Alert.alert('Sign out', `Are you sure you want to sign out?${pendingNote}`, [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Sign out',

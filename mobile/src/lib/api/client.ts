@@ -12,6 +12,10 @@ type RequestOptions = {
   method?: string;
   body?: unknown;
   headers?: Record<string, string>;
+  // Gives up after this long and throws a NetworkError. For requests the
+  // app would rather queue than wait on - a connection that is "up" but
+  // moving no data, or a backend still waking from a cold start.
+  timeoutMs?: number;
 };
 
 // Thrown for non-2xx responses. `status` and `body` are kept because some
@@ -29,17 +33,32 @@ export class ApiRequestError extends Error {
   }
 }
 
+// Thrown when no response arrived at all. The request may or may not have
+// reached the server, which is why the offline queue relies on the order's
+// clientRef to make a retry safe. Distinct from ApiRequestError so callers
+// can tell "offline, try later" from "the server said no".
+export class NetworkError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'NetworkError';
+  }
+}
+
 // fetch() rejects with a bare TypeError ("Network request failed") whenever
 // no response arrived at all - backend not running, wrong IP, firewall. The
 // message says nothing about which, so name the URL and the likely causes.
-async function doFetch(url: string, options: RequestInit) {
+async function doFetch(url: string, options: RequestInit, timeoutMs?: number) {
+  const controller = timeoutMs ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
   try {
-    return await fetch(url, options);
+    return await fetch(url, controller ? { ...options, signal: controller.signal } : options);
   } catch (err) {
-    console.error(`[api] ${options.method ?? 'GET'} ${url} failed before a response arrived:`, err);
-    throw new Error(
+    console.warn(`[api] ${options.method ?? 'GET'} ${url} failed before a response arrived:`, err);
+    throw new NetworkError(
       `Could not reach the server at ${url}. Check that the backend is running and that this device can reach it.`
     );
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
@@ -54,16 +73,20 @@ async function parseResponse(response: Response) {
   return data;
 }
 
-async function request(path: string, { method = 'GET', body, headers }: RequestOptions = {}) {
-  const response = await doFetch(`${API_BASE_URL}${path}`, {
-    method,
-    headers: {
-      ...(body ? { 'Content-Type': 'application/json' } : {}),
-      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-      ...headers,
+async function request(path: string, { method = 'GET', body, headers, timeoutMs }: RequestOptions = {}) {
+  const response = await doFetch(
+    `${API_BASE_URL}${path}`,
+    {
+      method,
+      headers: {
+        ...(body ? { 'Content-Type': 'application/json' } : {}),
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        ...headers,
+      },
+      body: body ? JSON.stringify(body) : undefined,
     },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+    timeoutMs
+  );
 
   return parseResponse(response);
 }

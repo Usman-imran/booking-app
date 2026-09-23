@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { randomUUID } from 'expo-crypto';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -11,6 +12,8 @@ import { CustomerPickerModal } from '@/components/orders/CustomerPickerModal';
 import { OrderReceiptModal } from '@/components/orders/OrderReceiptModal';
 import { ProductPickerModal } from '@/components/orders/ProductPickerModal';
 import { PressableScale } from '@/components/PressableScale';
+import { SyncStatusBar } from '@/components/SyncStatusBar';
+import { NetworkError } from '@/lib/api/client';
 import type { Customer } from '@/lib/api/customers';
 import {
   createOrder,
@@ -19,10 +22,13 @@ import {
   updateDraftOrder,
   type OrderCustomer,
   type OrderDetail,
+  type OrderInput,
   type OrderItem,
 } from '@/lib/api/orders';
 import { listProducts, type Product } from '@/lib/api/products';
+import { isOnline, useIsOnline } from '@/lib/offline/network';
 import { applicableScheme, calculateLine, calculateTotals, formatScheme } from '@/lib/orderCalc';
+import { onOrderSynced, queueOrder } from '@/lib/syncService';
 import { cardShadow, colors, formatMoney, radius, spacing } from '@/lib/theme';
 
 // Mirrors the backend's own caps so the booker is told before a request is
@@ -30,6 +36,23 @@ import { cardShadow, colors, formatMoney, radius, spacing } from '@/lib/theme';
 const MAX_ITEMS = 200;
 const MAX_QUANTITY = 1000000;
 const REMARKS_MAX = 1000;
+
+// How long a new order waits on the server before it is saved on the
+// device instead. Short enough that a booker on a signal that's "up" but
+// moving nothing isn't left staring at a spinner; the background sync
+// allows far longer.
+const CREATE_TIMEOUT_MS = 20_000;
+
+// A new order saved on the device instead of the server. `reason` is
+// whether the device knew it was offline or the server just didn't answer.
+type SavedOffline = {
+  clientRef: string;
+  status: 'draft' | 'submitted';
+  reason: 'offline' | 'unreachable';
+  customerName: string;
+  itemCount: number;
+  total: number;
+};
 
 // Quantities and discounts live in state as strings so a box can be empty
 // mid-edit instead of snapping back to a number the booker didn't type.
@@ -72,8 +95,13 @@ type SelectedCustomer = Pick<Customer | OrderCustomer, 'id' | 'name' | 'code' | 
 //
 // Every figure shown is a live preview from orderCalc. The server
 // recalculates all of it on save and returns the authoritative result.
+//
+// A NEW order still saves with no connection: it goes to the offline queue
+// (lib/syncService) and is sent when the device is back online. Editing a
+// saved draft needs the server, since the draft lives there.
 export function CreateOrderScreen({ draftId }: { draftId?: string }) {
   const isEditing = Boolean(draftId);
+  const online = useIsOnline();
 
   const [customer, setCustomer] = useState<SelectedCustomer | null>(null);
   const [lines, setLines] = useState<Line[]>([]);
@@ -86,6 +114,10 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
   // The order whose receipt is open for sharing - set as soon as a new
   // order is submitted, and again from the success banner's Share button.
   const [shareOrder, setShareOrder] = useState<OrderDetail | null>(null);
+  const [savedOffline, setSavedOffline] = useState<SavedOffline | null>(null);
+  // The success banner is showing an order that was queued and has since
+  // synced - its invoice hasn't been shared yet, so "again" would be wrong.
+  const [syncedFromOffline, setSyncedFromOffline] = useState(false);
 
   const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
   const [productPickerOpen, setProductPickerOpen] = useState(false);
@@ -149,6 +181,19 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadDraft();
   }, [loadDraft]);
+
+  // The order just saved offline reached the server while this screen is
+  // still open: swap the local placeholder for the real order, number and
+  // all, so its invoice can be shared from here.
+  useEffect(() => {
+    if (!savedOffline) return;
+    return onOrderSynced((clientRef, order) => {
+      if (clientRef !== savedOffline.clientRef) return;
+      setSavedOffline(null);
+      setSuccess(order);
+      setSyncedFromOffline(true);
+    });
+  }, [savedOffline]);
 
   const cartQuantities = useMemo(
     () => new Map(lines.map((line) => [line.product.id, parseQty(line.quantity) ?? 0])),
@@ -269,9 +314,33 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
     return null;
   }
 
+  // Puts a new order in the offline queue and clears the form, exactly as a
+  // successful save would. Throws if the device couldn't store it - the
+  // form is then left as it was, so nothing the booker entered is lost.
+  async function saveOffline(
+    clientRef: string,
+    status: 'draft' | 'submitted',
+    payload: OrderInput,
+    reason: SavedOffline['reason']
+  ) {
+    await queueOrder({
+      clientRef,
+      status,
+      input: payload,
+      customer: { id: customer!.id, name: customer!.name, code: customer!.code },
+      itemCount: lines.length,
+      total: totals.total,
+      createdAt: new Date().toISOString(),
+    });
+    setSavedOffline({ clientRef, status, reason, customerName: customer!.name, itemCount: lines.length, total: totals.total });
+    resetForm();
+  }
+
   async function save(status: 'draft' | 'submitted') {
     setError(null);
     setSuccess(null);
+    setSavedOffline(null);
+    setSyncedFromOffline(false);
 
     const problem = validate(status);
     if (problem) {
@@ -295,7 +364,27 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
     setSaving(status);
     try {
       if (!isEditing) {
-        const data = await createOrder({ ...payload, status });
+        // Generated once per save and kept with the order from here on: if
+        // the attempt below times out after the server has already saved
+        // it, the queued retry carries the same key and the server returns
+        // that order instead of booking a second one.
+        const clientRef = randomUUID();
+
+        if (!isOnline()) {
+          await saveOffline(clientRef, status, payload, 'offline');
+          return;
+        }
+
+        let data;
+        try {
+          data = await createOrder({ ...payload, status, clientRef }, { timeoutMs: CREATE_TIMEOUT_MS });
+        } catch (err) {
+          // No answer from the server (not a refusal - those are shown as
+          // errors below): hand the order to the queue rather than lose it.
+          if (!(err instanceof NetworkError)) throw err;
+          await saveOffline(clientRef, status, payload, 'unreachable');
+          return;
+        }
         setSuccess(data.order);
         resetForm();
         // A submitted order goes straight to the share sheet; a draft has
@@ -319,7 +408,13 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
       // a draft ends the same way as submitting a new order.
       router.replace({ pathname: '/orders/[id]', params: { id: draftId!, share: '1' } });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong.');
+      setError(
+        isEditing && err instanceof NetworkError
+          ? 'Could not reach the server. A saved draft can only be changed online - your edits are still on screen, so try again once you are connected.'
+          : err instanceof Error
+            ? err.message
+            : 'Something went wrong.'
+      );
     } finally {
       setSaving(null);
     }
@@ -355,8 +450,29 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
 
   const hasUnsavedWork = Boolean(customer || lines.length > 0 || remarks.trim());
 
+  // Offline, the primary action can't share anything yet - there's no order
+  // number or server-priced invoice until it syncs - so it says what it does.
+  const savesOffline = !isEditing && !online;
+
   return (
     <FormScreen>
+      <SyncStatusBar />
+
+      {savedOffline ? (
+        <Banner kind="info" onDismiss={() => setSavedOffline(null)}>
+          <Text style={styles.bold}>
+            {savedOffline.reason === 'offline'
+              ? 'Order saved offline. Will sync when back online.'
+              : "The server didn't respond, so the order was saved on this device. It will sync automatically."}
+          </Text>{' '}
+          {savedOffline.customerName} - {savedOffline.itemCount} item{savedOffline.itemCount === 1 ? '' : 's'}, estimated
+          total {formatMoney(savedOffline.total)}.
+          {savedOffline.status === 'submitted'
+            ? ' Its order number and invoice are issued when it syncs - you can share it from here or from Orders then.'
+            : ' It will appear in your drafts once it syncs.'}
+        </Banner>
+      ) : null}
+
       {success ? (
         <Banner kind="success" onDismiss={() => setSuccess(null)}>
           <Text style={styles.bold}>
@@ -370,7 +486,7 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
 
       {success && success.status === 'submitted' ? (
         <Button
-          title="Share Invoice Again"
+          title={syncedFromOffline ? 'Share Invoice' : 'Share Invoice Again'}
           icon="share-social-outline"
           variant="secondary"
           onPress={() => setShareOrder(success)}
@@ -555,8 +671,8 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
           style={styles.flex1}
         />
         <Button
-          title="Share Order"
-          icon="share-social-outline"
+          title={savesOffline ? 'Save Order Offline' : 'Share Order'}
+          icon={savesOffline ? 'cloud-offline-outline' : 'share-social-outline'}
           onPress={() => save('submitted')}
           loading={saving === 'submitted'}
           disabled={isBusy}
@@ -572,6 +688,9 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
         Share Order submits the order, assigns its order number and opens the invoice to share as a JPG or PDF - on
         WhatsApp or any other app. Submitting is final: a submitted order cannot be edited, only cancelled. Bonus
         quantity is free - added on top of the paid quantity, never taken out of it.
+        {isEditing
+          ? ''
+          : ' With no connection, the order is saved on this device and sent automatically once you are back online; the server confirms its prices then.'}
       </Text>
 
       <CustomerPickerModal

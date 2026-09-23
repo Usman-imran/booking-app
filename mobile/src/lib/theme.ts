@@ -59,6 +59,9 @@ export const STATUS_STYLES: Record<string, { fg: string; bg: string; label: stri
   submitted: { fg: colors.success, bg: colors.successSoft, label: 'Submitted' },
   draft: { fg: colors.warning, bg: colors.warningSoft, label: 'Draft' },
   cancelled: { fg: colors.danger, bg: colors.dangerSoft, label: 'Cancelled' },
+  // Offline-queue states: saved on the device, not yet on the server.
+  pending_sync: { fg: colors.primaryDark, bg: colors.primarySoft, label: 'Pending Sync' },
+  sync_failed: { fg: colors.danger, bg: colors.dangerSoft, label: 'Sync Failed' },
 };
 
 export function formatMoney(value: number) {
