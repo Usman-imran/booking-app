@@ -20,7 +20,7 @@ import { SectionHeader } from '@/components/SectionHeader';
 import { getDashboard, type DashboardData } from '@/lib/api/dashboard';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { useRevalidateOnFocus } from '@/lib/usePaginatedList';
-import { cardShadow, colors, formatCompactMoney, formatMoney, radius, spacing } from '@/lib/theme';
+import { cardShadow, colors, formatCompactRs, formatRs, radius, spacing } from '@/lib/theme';
 
 type IconName = keyof typeof Ionicons.glyphMap;
 type Accent = keyof typeof colors.accent;
@@ -186,8 +186,8 @@ export default function Dashboard() {
                   <SummaryCard
                     icon="wallet"
                     label={`${monthShort} Revenue`}
-                    value={formatCompactMoney(data.monthly.sales)}
-                    hint={formatMoney(data.monthly.sales)}
+                    value={formatCompactRs(data.monthly.sales)}
+                    hint={formatRs(data.monthly.sales)}
                     primary
                   />
                   <SummaryCard
@@ -199,8 +199,8 @@ export default function Dashboard() {
                   <SummaryCard
                     icon="today"
                     label="Today's Sales"
-                    value={formatCompactMoney(data.today.sales)}
-                    hint={formatMoney(data.today.sales)}
+                    value={formatCompactRs(data.today.sales)}
+                    hint={formatRs(data.today.sales)}
                   />
                   <SummaryCard
                     icon="time"

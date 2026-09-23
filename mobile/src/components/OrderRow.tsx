@@ -2,7 +2,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { PressableScale } from './PressableScale';
 import { StatusBadge } from './StatusBadge';
-import { cardShadow, colors, formatDateTime, formatMoney, radius, spacing } from '@/lib/theme';
+import { cardShadow, colors, formatDateTime, formatRs, radius, spacing } from '@/lib/theme';
 
 export type OrderRowData = {
   id: string | number;
@@ -28,7 +28,7 @@ export function OrderRow({ order, onPress }: { order: OrderRowData; onPress?: ()
         <Text style={styles.date}>{formatDateTime(order.submittedAt ?? order.createdAt ?? null)}</Text>
       </View>
       <View style={styles.end}>
-        <Text style={[styles.total, isCancelled && styles.totalVoid]}>{formatMoney(order.total)}</Text>
+        <Text style={[styles.total, isCancelled && styles.totalVoid]}>{formatRs(order.total)}</Text>
         <StatusBadge status={order.status} />
       </View>
     </PressableScale>

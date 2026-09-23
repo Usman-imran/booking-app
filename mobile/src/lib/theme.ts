@@ -14,10 +14,15 @@ export const colors = {
   textMuted: '#5b6472',
   danger: '#b3261e',
   dangerSoft: '#fdecec',
+  // A stronger red for money owed - reads as an alert next to dangerSoft.
+  dangerStrong: '#d93a30',
   success: '#1e8e5a',
   successSoft: '#e4f5ec',
   warning: '#b7791f',
   warningSoft: '#fdf3e0',
+  // The two greys behind pressed/selected chrome that isn't a card.
+  track: '#eef1f6',
+  overlay: 'rgba(15, 30, 51, 0.45)',
   // Accents for the quick-action tiles - each action gets its own hue so
   // they can be told apart at a glance.
   accent: {
@@ -55,11 +60,70 @@ export const cardShadow = {
   elevation: 2,
 } as const;
 
+// Barely-there elevation for chrome that sits ON a card (chips, segment
+// thumbs) - enough to lift it off the track without a second card shadow.
+export const subtleShadow = {
+  shadowColor: '#0f1e33',
+  shadowOpacity: 0.05,
+  shadowRadius: 4,
+  shadowOffset: { width: 0, height: 1 },
+  elevation: 1,
+} as const;
+
+// What floats above everything: the FAB and the tab bar.
+export const floatingShadow = {
+  shadowColor: '#0f1e33',
+  shadowOpacity: 0.18,
+  shadowRadius: 14,
+  shadowOffset: { width: 0, height: 6 },
+  elevation: 8,
+} as const;
+
+// The type scale. Screens reach for these instead of restating sizes, so a
+// title on Orders is the same title on Products.
+export const typography = {
+  screenTitle: { fontSize: 26, fontWeight: '700', color: colors.text },
+  screenSubtitle: { fontSize: 13, color: colors.textMuted, marginTop: 2 },
+  cardTitle: { fontSize: 15, fontWeight: '700', color: colors.text },
+  cardMeta: { fontSize: 12, color: colors.textMuted },
+  money: { fontSize: 16, fontWeight: '700', color: colors.text },
+  label: { fontSize: 13, fontWeight: '600', color: colors.textSecondary },
+  badge: { fontSize: 10, fontWeight: '700', letterSpacing: 0.3 },
+  groupHeading: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+} as const;
+
+// Fixed sizes the tab bar, the ad slot and the floating buttons agree on,
+// so a screen can reserve exactly the room they take.
+export const layout = {
+  tabBarRowHeight: 58,
+  fabSize: 56,
+  // Gap between a FAB and whatever it floats over.
+  fabInset: 20,
+} as const;
+
 export const STATUS_STYLES: Record<string, { fg: string; bg: string; label: string }> = {
   submitted: { fg: colors.success, bg: colors.successSoft, label: 'Submitted' },
   draft: { fg: colors.warning, bg: colors.warningSoft, label: 'Draft' },
   cancelled: { fg: colors.danger, bg: colors.dangerSoft, label: 'Cancelled' },
 };
+
+// Every figure the app shows is in rupees, so the unit is part of the
+// formatting rather than something each screen remembers to prepend.
+export const CURRENCY = 'Rs';
+
+export function formatRs(value: number) {
+  return `${CURRENCY} ${formatMoney(value)}`;
+}
+
+export function formatCompactRs(value: number) {
+  return `${CURRENCY} ${formatCompactMoney(value)}`;
+}
 
 export function formatMoney(value: number) {
   return new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(

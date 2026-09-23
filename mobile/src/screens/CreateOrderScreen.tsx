@@ -70,10 +70,16 @@ type SelectedCustomer = Pick<Customer | OrderCustomer, 'id' | 'name' | 'code' | 
 // number) and then opens the invoice to share as a JPG or PDF. A booker's
 // last step is handing the customer their receipt, so the two are one tap.
 //
+// `copyFromId` is the third route: re-ordering. It seeds a NEW order from
+// any past order's customer and lines, at today's prices - the same load
+// path as a draft, minus the "this belongs to a draft" bookkeeping.
+//
 // Every figure shown is a live preview from orderCalc. The server
 // recalculates all of it on save and returns the authoritative result.
-export function CreateOrderScreen({ draftId }: { draftId?: string }) {
+export function CreateOrderScreen({ draftId, copyFromId }: { draftId?: string; copyFromId?: string }) {
   const isEditing = Boolean(draftId);
+  // The order whose contents seed the form, whichever route brought us here.
+  const sourceId = draftId ?? copyFromId;
 
   const [customer, setCustomer] = useState<SelectedCustomer | null>(null);
   const [lines, setLines] = useState<Line[]>([]);
@@ -90,23 +96,24 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
   const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
   const [productPickerOpen, setProductPickerOpen] = useState(false);
 
-  // Loading an existing draft (edit mode only).
-  const [loadStatus, setLoadStatus] = useState<'loading' | 'ready' | 'error'>(isEditing ? 'loading' : 'ready');
+  // Loading the order the form is seeded from (edit or re-order).
+  const [loadStatus, setLoadStatus] = useState<'loading' | 'ready' | 'error'>(sourceId ? 'loading' : 'ready');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [notDraft, setNotDraft] = useState<OrderDetail | null>(null);
   const [repricedProducts, setRepricedProducts] = useState<string[]>([]);
   const [unavailableProducts, setUnavailableProducts] = useState<string[]>([]);
 
-  const loadDraft = useCallback(async () => {
-    if (!draftId) return;
+  const loadSource = useCallback(async () => {
+    if (!sourceId) return;
     setLoadStatus('loading');
     setLoadError(null);
     setNotDraft(null);
     try {
-      const { order } = await getOrder(draftId);
+      const { order } = await getOrder(sourceId);
 
-      // Submitted orders are not editable.
-      if (order.status !== 'draft') {
+      // Submitted orders are not editable - but they can be re-ordered,
+      // which is a new order and so has nothing to lock.
+      if (isEditing && order.status !== 'draft') {
         setNotDraft(order);
         setLoadStatus('ready');
         return;
@@ -122,15 +129,22 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
 
       for (const item of order.items) {
         const product = productsById.get(item.productId);
-        // A product deactivated since the draft was saved can't be ordered
-        // any more, so the line is dropped and called out.
+        // A product deactivated since that order can't be ordered any
+        // more, so the line is dropped and called out.
         if (!product || !product.isActive) {
           unavailable.push(item.productName);
           continue;
         }
         if (hasRepriced(item, product)) repriced.push(product.name);
-        // The SAVED discount is kept, not reset to the product's current one.
-        nextLines.push({ product, quantity: String(item.paidQty), discount: String(item.discount) });
+        // A draft keeps the discount it was saved with. A re-order starts
+        // from the product's current discount instead: last month's special
+        // price is not this month's offer, and the booker can still change
+        // it per line.
+        nextLines.push({
+          product,
+          quantity: String(item.paidQty),
+          discount: String(isEditing ? item.discount : product.discount),
+        });
       }
 
       setCustomer(order.customer ?? null);
@@ -143,12 +157,12 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
       setLoadError(err instanceof Error ? err.message : 'Something went wrong.');
       setLoadStatus('error');
     }
-  }, [draftId]);
+  }, [sourceId, isEditing]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadDraft();
-  }, [loadDraft]);
+    loadSource();
+  }, [loadSource]);
 
   const cartQuantities = useMemo(
     () => new Map(lines.map((line) => [line.product.id, parseQty(line.quantity) ?? 0])),
@@ -325,18 +339,23 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
     }
   }
 
-  // --- Edit-mode load states -----------------------------------------
-  if (isEditing && loadStatus === 'loading') {
+  // --- Seeded-form load states ---------------------------------------
+  if (sourceId && loadStatus === 'loading') {
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={styles.muted}>Loading draft…</Text>
+        <Text style={styles.muted}>{isEditing ? 'Loading draft…' : 'Loading the order to repeat…'}</Text>
       </View>
     );
   }
 
-  if (isEditing && loadStatus === 'error') {
-    return <ErrorState message={`Could not load this draft: ${loadError}`} onRetry={loadDraft} />;
+  if (sourceId && loadStatus === 'error') {
+    return (
+      <ErrorState
+        message={`Could not load ${isEditing ? 'this draft' : 'that order'}: ${loadError}`}
+        onRetry={loadSource}
+      />
+    );
   }
 
   if (isEditing && notDraft) {
@@ -381,15 +400,17 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
       {unavailableProducts.length > 0 ? (
         <Banner kind="error">
           {unavailableProducts.length === 1 ? 'A product has' : `${unavailableProducts.length} products have`} been
-          deactivated since this draft was saved and {unavailableProducts.length === 1 ? 'was' : 'were'} removed from
-          it: {unavailableProducts.join(', ')}. Save the draft to keep this change.
+          deactivated since {isEditing ? 'this draft was saved' : 'that order'} and{' '}
+          {unavailableProducts.length === 1 ? 'was' : 'were'} left off: {unavailableProducts.join(', ')}.
+          {isEditing ? ' Save the draft to keep this change.' : ''}
         </Banner>
       ) : null}
 
       {repricedProducts.length > 0 ? (
         <Banner kind="info">
-          Prices or schemes have changed since this draft was saved, so it has been re-priced at today&apos;s values:{' '}
-          {repricedProducts.join(', ')}. Line discounts you set are kept as they were.
+          Prices or schemes have changed since {isEditing ? 'this draft was saved' : 'that order'}, so{' '}
+          {isEditing ? 'it has been' : 'these lines are'} re-priced at today&apos;s values: {repricedProducts.join(', ')}.
+          {isEditing ? ' Line discounts you set are kept as they were.' : ''}
         </Banner>
       ) : null}
 

@@ -1,112 +1,125 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useCallback } from 'react';
-import {
-  ActivityIndicator,
-  FlatList,
-  Pressable,
-  RefreshControl,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
-import { PressableScale } from '@/components/PressableScale';
-import { listProducts, type Product } from '@/lib/api/products';
-import { formatTier } from '@/lib/orderCalc';
-import { cardShadow, colors, formatMoney, radius, spacing } from '@/lib/theme';
+import { FAB } from '@/components/FAB';
+import { FilterChips, type Chip } from '@/components/FilterChips';
+import { ProductGridCard, ProductListCard } from '@/components/ProductCard';
+import { ScreenHeader } from '@/components/ScreenHeader';
+import { SearchField } from '@/components/SearchField';
+import { listProductCompanies, listProducts } from '@/lib/api/products';
+import { colors, layout, radius, spacing } from '@/lib/theme';
 import { usePaginatedList, useRevalidateOnFocus } from '@/lib/usePaginatedList';
 
-function ProductCard({ product, onPress }: { product: Product; onPress: () => void }) {
-  const hasScheme = product.bonusSchemes.length > 0;
+type ViewMode = 'list' | 'grid';
+
+// The "no company chosen" chip. A real company can't collide with it
+// because the value is the manufacturer's own name.
+const ALL_COMPANIES = '__all';
+
+function ViewToggle({ value, onChange }: { value: ViewMode; onChange: (mode: ViewMode) => void }) {
   return (
-    <PressableScale style={styles.card} onPress={onPress}>
-      <View style={styles.cardIcon}>
-        <Ionicons name="cube-outline" size={22} color={colors.primary} />
-      </View>
-      <View style={styles.cardMain}>
-        <Text style={styles.productName} numberOfLines={1}>
-          {product.name}
-        </Text>
-        <Text style={styles.productMeta} numberOfLines={1}>
-          {product.code} · {product.company}
-          {product.packing ? ` · ${product.packing}` : ''}
-        </Text>
-        <View style={styles.tags}>
-          {!product.isActive ? <Text style={[styles.tag, styles.tagInactive]}>Inactive</Text> : null}
-          {hasScheme ? (
-            <Text style={[styles.tag, styles.tagScheme]} numberOfLines={1}>
-              {product.bonusSchemes.map(formatTier).join(', ')} free
-            </Text>
-          ) : null}
-          {product.discount > 0 ? <Text style={[styles.tag, styles.tagDiscount]}>{product.discount}% off</Text> : null}
-        </View>
-      </View>
-      <View style={styles.cardEnd}>
-        <Text style={styles.price}>{formatMoney(product.salePrice)}</Text>
-        <Text style={styles.mrp}>MRP {formatMoney(product.mrp)}</Text>
-      </View>
-    </PressableScale>
+    <View style={styles.toggle}>
+      {(['list', 'grid'] as const).map((mode) => {
+        const active = value === mode;
+        return (
+          <Pressable
+            key={mode}
+            onPress={() => onChange(mode)}
+            accessibilityRole="button"
+            accessibilityState={{ selected: active }}
+            accessibilityLabel={mode === 'list' ? 'List view' : 'Grid view'}
+            style={({ pressed }) => [styles.toggleButton, active && styles.toggleButtonActive, pressed && styles.pressed]}>
+            <Ionicons
+              name={mode === 'list' ? 'list' : 'grid'}
+              size={16}
+              color={active ? colors.primary : colors.textMuted}
+            />
+          </Pressable>
+        );
+      })}
+    </View>
   );
 }
 
 export default function Products() {
-  const fetchPage = useCallback(async (page: number, search: string) => {
-    const result = await listProducts({ page, limit: 25, search: search || undefined });
-    return { items: result.products, pagination: result.pagination };
-  }, []);
+  const [view, setView] = useState<ViewMode>('list');
+  const [company, setCompany] = useState<string>(ALL_COMPANIES);
+  const [companies, setCompanies] = useState<string[]>([]);
+
+  const fetchPage = useCallback(
+    async (page: number, search: string) => {
+      const result = await listProducts({
+        page,
+        limit: 25,
+        search: search || undefined,
+        company: company === ALL_COMPANIES ? undefined : company,
+      });
+      return { items: result.products, pagination: result.pagination };
+    },
+    [company]
+  );
 
   const list = usePaginatedList(fetchPage);
-
   useRevalidateOnFocus(list.revalidate);
+
+  // The manufacturers behind the carousel. Loaded once: the set only
+  // changes when a product is added under a new company, and a stale chip
+  // row is a far smaller problem than a request on every keystroke.
+  useEffect(() => {
+    let cancelled = false;
+    listProductCompanies()
+      .then(({ companies: names }) => {
+        if (!cancelled) setCompanies(names);
+      })
+      .catch(() => {
+        // The carousel is a convenience; search still finds everything.
+        if (!cancelled) setCompanies([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const chips = useMemo<Chip<string>[]>(
+    () => [
+      { key: ALL_COMPANIES, label: 'All', icon: 'apps-outline' },
+      ...companies.map((name) => ({ key: name, label: name })),
+    ],
+    [companies]
+  );
+
+  const total = list.pagination?.total;
+  const subtitle =
+    total === undefined ? null : `${total} ${total === 1 ? 'product' : 'products'}${company === ALL_COMPANIES ? '' : ` · ${company}`}`;
+
+  const isGrid = view === 'grid';
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.title}>Products</Text>
-          {list.pagination ? <Text style={styles.count}>{list.pagination.total} total</Text> : null}
-        </View>
-        <View style={styles.headerActions}>
-          <Pressable
-            onPress={() => router.push('/products/import')}
-            hitSlop={6}
-            style={({ pressed }) => [styles.iconButton, pressed && { opacity: 0.7 }]}>
-            <Ionicons name="cloud-upload-outline" size={22} color={colors.primary} />
-          </Pressable>
-          <Pressable
-            onPress={() => router.push('/products/new')}
-            hitSlop={6}
-            style={({ pressed }) => [styles.iconButton, styles.iconButtonPrimary, pressed && { opacity: 0.7 }]}>
-            <Ionicons name="add" size={24} color="#fff" />
-          </Pressable>
-        </View>
+      <ScreenHeader
+        title="Products"
+        subtitle={subtitle}
+        actions={[
+          { icon: 'cloud-upload-outline', label: 'Import products', onPress: () => router.push('/products/import') },
+        ]}
+      />
+
+      <View style={styles.search}>
+        <SearchField value={list.search} onChangeText={list.setSearch} placeholder="Search by name, code or company" />
       </View>
 
-
-
-      <View style={styles.searchBox}>
-        <Ionicons name="search" size={18} color={colors.textMuted} />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search by name, code or company"
-          placeholderTextColor={colors.textMuted}
-          value={list.search}
-          onChangeText={list.setSearch}
-          autoCapitalize="none"
-          autoCorrect={false}
-          returnKeyType="search"
-        />
-        {list.search ? (
-          <Pressable onPress={() => list.setSearch('')} hitSlop={8}>
-            <Ionicons name="close-circle" size={18} color={colors.textMuted} />
-          </Pressable>
-        ) : null}
-      </View>
+      <FilterChips
+        chips={chips}
+        selected={[company]}
+        // One company at a time: tapping the active chip goes back to All.
+        onToggle={(key) => setCompany((current) => (current === key ? ALL_COMPANIES : key))}
+        leading={<ViewToggle value={view} onChange={setView} />}
+      />
 
       {list.status === 'loading' ? (
         <View style={styles.center}>
@@ -116,12 +129,22 @@ export default function Products() {
         <ErrorState message={`Could not load products: ${list.error}`} onRetry={list.retry} />
       ) : (
         <FlatList
+          // FlatList cannot change its column count in place, so the key
+          // forces a fresh list when the view mode flips.
+          key={view}
           data={list.items}
           keyExtractor={(item) => item.id}
+          numColumns={isGrid ? 2 : 1}
+          columnWrapperStyle={isGrid ? styles.column : undefined}
           contentContainerStyle={styles.listContent}
-          renderItem={({ item }) => (
-            <ProductCard product={item} onPress={() => router.push(`/products/${item.id}`)} />
-          )}
+          keyboardShouldPersistTaps="handled"
+          renderItem={({ item }) =>
+            isGrid ? (
+              <ProductGridCard product={item} onPress={() => router.push(`/products/${item.id}`)} />
+            ) : (
+              <ProductListCard product={item} onPress={() => router.push(`/products/${item.id}`)} />
+            )
+          }
           refreshControl={
             <RefreshControl refreshing={list.isRefreshing} onRefresh={list.refresh} tintColor={colors.primary} />
           }
@@ -130,8 +153,14 @@ export default function Products() {
           ListEmptyComponent={
             <EmptyState
               icon="cube-outline"
-              title={list.search ? 'No matching products' : 'No products yet'}
-              message={list.search ? 'Try a different search.' : 'Products you add will appear here.'}
+              title={list.search ? 'No matching products' : 'No products here'}
+              message={
+                list.search
+                  ? 'Try a different search or pick another company.'
+                  : company === ALL_COMPANIES
+                    ? 'Products you add will appear here.'
+                    : `Nothing in the catalogue for ${company} yet.`
+              }
             />
           }
           ListFooterComponent={
@@ -139,84 +168,40 @@ export default function Products() {
           }
         />
       )}
+
+      <FAB icon="add" label="Add product" onPress={() => router.push('/products/new')} />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: spacing.xl,
-    paddingTop: spacing.lg,
-    paddingBottom: spacing.md,
-  },
-  title: { fontSize: 26, fontWeight: '700', color: colors.text },
-  count: { fontSize: 13, color: colors.textMuted, marginTop: 2 },
-  headerActions: { flexDirection: 'row', gap: spacing.sm },
-  iconButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.primarySoft,
-  },
-  iconButtonPrimary: { backgroundColor: colors.primary },
-  searchBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginHorizontal: spacing.xl,
-    marginBottom: spacing.md,
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingHorizontal: spacing.md,
-    height: 44,
-  },
-  searchInput: { flex: 1, fontSize: 15, color: colors.text, paddingVertical: 0 },
+  search: { paddingHorizontal: spacing.xl, paddingBottom: spacing.md },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  listContent: { paddingHorizontal: spacing.xl, paddingBottom: spacing.xxl, flexGrow: 1 },
+  listContent: {
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.md,
+    // Clears the FAB so the last card is never trapped underneath it.
+    paddingBottom: layout.fabSize + layout.fabInset * 2,
+    flexGrow: 1,
+  },
+  column: { gap: spacing.md },
   footer: { paddingVertical: spacing.lg },
 
-  card: {
+  toggle: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    backgroundColor: colors.surface,
+    gap: 2,
+    padding: 3,
     borderRadius: radius.md,
-    padding: spacing.md + 2,
-    marginBottom: spacing.sm + 2,
-    ...cardShadow,
+    backgroundColor: colors.track,
   },
-  cardIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: radius.md,
-    backgroundColor: colors.primarySoft,
+  toggleButton: {
+    width: 32,
+    height: 26,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  cardMain: { flex: 1, gap: 2 },
-  cardEnd: { alignItems: 'flex-end' },
-  productName: { fontSize: 14, fontWeight: '700', color: colors.text },
-  productMeta: { fontSize: 12, color: colors.textMuted },
-  tags: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 },
-  tag: {
-    fontSize: 10,
-    fontWeight: '700',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
     borderRadius: radius.sm,
-    overflow: 'hidden',
   },
-  tagInactive: { color: colors.textMuted, backgroundColor: colors.surfaceMuted },
-  tagScheme: { color: colors.success, backgroundColor: colors.successSoft },
-  tagDiscount: { color: colors.warning, backgroundColor: colors.warningSoft },
-  price: { fontSize: 15, fontWeight: '700', color: colors.text },
-  mrp: { fontSize: 11, color: colors.textMuted, marginTop: 2 },
+  toggleButtonActive: { backgroundColor: colors.surface },
+  pressed: { opacity: 0.6 },
 });

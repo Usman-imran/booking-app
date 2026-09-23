@@ -31,7 +31,6 @@ export default function RootLayout() {
           <Stack.Screen name="analytics" options={{ headerShown: true }} />
           <Stack.Screen name="orders/new" options={{ headerShown: true }} />
           <Stack.Screen name="orders/[id]" options={{ headerShown: true }} />
-          <Stack.Screen name="customers/index" options={{ headerShown: true }} />
           <Stack.Screen name="customers/new" options={{ headerShown: true }} />
           <Stack.Screen name="products/new" options={{ headerShown: true }} />
           <Stack.Screen name="products/import" options={{ headerShown: true }} />
