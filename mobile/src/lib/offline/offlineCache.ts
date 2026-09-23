@@ -1,5 +1,6 @@
 import { NetworkError } from '../api/client';
 import { listCustomers, type Customer } from '../api/customers';
+import type { DashboardData } from '../api/dashboard';
 import type { ListOrdersParams, OrderSummary, Pagination } from '../api/orders';
 import { listProducts, type Product } from '../api/products';
 import { isOnline } from './network';
@@ -135,6 +136,22 @@ export async function readOrdersPage(status: ListOrdersParams['status'], search?
     (o) => contains(o.orderNumber, needle) || contains(o.customer?.name, needle) || contains(o.customer?.code, needle)
   );
   return { orders, pagination: { ...page.pagination, page: 1, total: orders.length, totalPages: 1 } };
+}
+
+// --- Dashboard ----------------------------------------------------------
+
+// The last dashboard the server returned, stamped with when, so Home can
+// show real (if dated) figures with no signal instead of an error.
+export type CachedDashboard = { fetchedAt: number; data: DashboardData };
+
+export async function saveDashboard(data: DashboardData) {
+  if (userId === null) return;
+  await writeJson(userKey(userId, 'dashboard'), { fetchedAt: Date.now(), data } satisfies CachedDashboard).catch(() => {});
+}
+
+export async function readDashboard(): Promise<CachedDashboard | null> {
+  if (userId === null) return null;
+  return readJson<CachedDashboard>(userKey(userId, 'dashboard'));
 }
 
 // --- Fallback -----------------------------------------------------------
