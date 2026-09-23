@@ -1,7 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Redirect, Tabs } from 'expo-router';
+import { BottomTabBar, type BottomTabBarProps } from 'expo-router/tabs';
 import { ActivityIndicator, Platform, StyleSheet, View, type ColorValue } from 'react-native';
 
+import { AdBanner } from '@/components/AdBanner';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { colors } from '@/lib/theme';
 
@@ -13,6 +15,20 @@ type TabIconProps = { color: ColorValue; focused: boolean; size: number };
 // rest, which is the convention on both platforms.
 function TabIcon({ active, inactive, color, focused, size }: TabIconProps & { active: IconName; inactive: IconName }) {
   return <Ionicons name={focused ? active : inactive} size={size} color={color} />;
+}
+
+// The tab bar with the ad banner stacked directly on top of it. Both sit in
+// the navigator's tab bar slot, which is laid out BELOW the screens rather
+// than over them - so every tab's content ends above the banner, the
+// banner ends above the tabs, and nothing overlaps whatever the ad's
+// height. The tab bar keeps its own bottom safe-area padding.
+function TabBarWithBanner(props: BottomTabBarProps) {
+  return (
+    <View>
+      <AdBanner />
+      <BottomTabBar {...props} />
+    </View>
+  );
 }
 
 // The signed-in area of the app. Guards every tab at once: without a
@@ -35,6 +51,7 @@ export default function TabsLayout() {
 
   return (
     <Tabs
+      tabBar={(props) => <TabBarWithBanner {...props} />}
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: colors.primary,

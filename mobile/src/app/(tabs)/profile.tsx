@@ -1,10 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import { useEffect, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/Avatar';
 import { PressableScale } from '@/components/PressableScale';
+import { isAdPrivacyOptionsRequired, showAdPrivacyOptions, useAdsStatus } from '@/lib/admob';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { usePendingOrders } from '@/lib/offline/offlineQueue';
 import { cardShadow, colors, formatDate, radius, spacing } from '@/lib/theme';
@@ -40,6 +42,19 @@ function LinkRow({ icon, label, onPress, last }: { icon: IconName; label: string
 export default function Profile() {
   const { user, logout } = useAuth();
   const pendingOrders = usePendingOrders();
+  // Users who were shown Google's ad-consent form (EEA/UK etc.) must be able
+  // to change their answer later; everyone else never sees this row.
+  const adsStatus = useAdsStatus();
+  const [adPrivacyRequired, setAdPrivacyRequired] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    isAdPrivacyOptionsRequired().then((required) => {
+      if (!cancelled) setAdPrivacyRequired(required);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [adsStatus]);
 
   function confirmLogout() {
     // Queued orders are kept on the device under this account, but only
@@ -89,6 +104,9 @@ export default function Profile() {
           <LinkRow icon="bar-chart-outline" label="Sales Reports" onPress={() => router.push('/reports')} />
           <LinkRow icon="flag-outline" label="Targets" onPress={() => router.push('/targets')} />
           <LinkRow icon="stats-chart-outline" label="Analytics" onPress={() => router.push('/analytics')} />
+          {adPrivacyRequired ? (
+            <LinkRow icon="shield-checkmark-outline" label="Ad privacy choices" onPress={showAdPrivacyOptions} />
+          ) : null}
           <LinkRow icon="settings-outline" label="Settings" onPress={() => router.push('/settings')} last />
         </View>
 

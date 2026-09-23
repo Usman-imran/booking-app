@@ -27,6 +27,7 @@ import {
 } from '@/lib/api/orders';
 import { listProducts, type Product } from '@/lib/api/products';
 import { isOnline, useIsOnline } from '@/lib/offline/network';
+import { recordOrderPlaced, showInterstitialIfDue, useInterstitialPreload } from '@/lib/admobInterstitial';
 import { applicableScheme, calculateLine, calculateTotals, formatScheme } from '@/lib/orderCalc';
 import { onOrderSynced, queueOrder } from '@/lib/syncService';
 import { cardShadow, colors, formatMoney, radius, spacing } from '@/lib/theme';
@@ -102,6 +103,9 @@ type SelectedCustomer = Pick<Customer | OrderCustomer, 'id' | 'name' | 'code' | 
 export function CreateOrderScreen({ draftId }: { draftId?: string }) {
   const isEditing = Boolean(draftId);
   const online = useIsOnline();
+  // Loads the every-5th-order interstitial in the background now, so it's
+  // ready by the time a qualifying order's receipt is closed.
+  useInterstitialPreload();
 
   const [customer, setCustomer] = useState<SelectedCustomer | null>(null);
   const [lines, setLines] = useState<Line[]>([]);
@@ -334,6 +338,9 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
     });
     setSavedOffline({ clientRef, status, reason, customerName: customer!.name, itemCount: lines.length, total: totals.total });
     resetForm();
+    // Counts towards the every-5th-order ad, but can't earn one: there's no
+    // receipt to close until it syncs.
+    if (status === 'submitted') recordOrderPlaced(null);
   }
 
   async function save(status: 'draft' | 'submitted') {
@@ -389,7 +396,12 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
         resetForm();
         // A submitted order goes straight to the share sheet; a draft has
         // no order number yet, so there is nothing to share.
-        if (status === 'submitted') setShareOrder(data.order);
+        if (status === 'submitted') {
+          // Not awaited: the count is bookkeeping and must never hold up
+          // the receipt.
+          recordOrderPlaced(data.order.id);
+          setShareOrder(data.order);
+        }
         return;
       }
 
@@ -404,6 +416,9 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
       }
 
       await submitDraftOrder(draftId!);
+      // A draft submitted is an order placed; its receipt is closed on the
+      // details screen, which checks for the ad there.
+      recordOrderPlaced(draftId!);
       // The details screen opens the share sheet on arrival, so submitting
       // a draft ends the same way as submitting a new order.
       router.replace({ pathname: '/orders/[id]', params: { id: draftId!, share: '1' } });
@@ -710,7 +725,16 @@ export function CreateOrderScreen({ draftId }: { draftId?: string }) {
         cartQuantities={cartQuantities}
         limitReached={lines.length >= MAX_ITEMS}
       />
-      <OrderReceiptModal visible={shareOrder !== null} order={shareOrder} onClose={() => setShareOrder(null)} />
+      <OrderReceiptModal
+        visible={shareOrder !== null}
+        order={shareOrder}
+        onClose={() => {
+          const closedOrderId = shareOrder?.id;
+          setShareOrder(null);
+          // Shows the interstitial only if this was a 5th/10th/... order.
+          showInterstitialIfDue(closedOrderId);
+        }}
+      />
     </FormScreen>
   );
 }

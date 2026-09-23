@@ -1,8 +1,10 @@
 import { Stack, type ErrorBoundaryProps } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { useEffect } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { initAds } from '@/lib/admob';
 import { AuthProvider } from '@/lib/auth/AuthContext';
 import { colors } from '@/lib/theme';
 
@@ -22,6 +24,12 @@ export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
 }
 
 export default function RootLayout() {
+  // Ad consent (where required by law) and SDK start-up, once per launch,
+  // in the background. Nothing waits on it; ads just stay off until ready.
+  useEffect(() => {
+    initAds();
+  }, []);
+
   return (
     <SafeAreaProvider>
       <AuthProvider>

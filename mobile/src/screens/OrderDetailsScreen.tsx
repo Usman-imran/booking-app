@@ -7,6 +7,7 @@ import { ErrorState } from '@/components/ErrorState';
 import { Banner } from '@/components/form/Banner';
 import { Button } from '@/components/form/Button';
 import { OrderReceiptModal } from '@/components/orders/OrderReceiptModal';
+import { showInterstitialIfDue } from '@/lib/admobInterstitial';
 import { StatusBadge } from '@/components/StatusBadge';
 import { cancelOrder, deleteDraftOrder, getOrder, submitDraftOrder, type OrderDetail } from '@/lib/api/orders';
 import { cardShadow, colors, formatDateTime, formatMoney, radius, spacing } from '@/lib/theme';
@@ -273,7 +274,16 @@ export function OrderDetailsScreen({ id, shareOnOpen = false }: { id: string; sh
         <Text style={styles.note}>This order was cancelled and is kept for the record only.</Text>
       )}
 
-      <OrderReceiptModal visible={isReceiptOpen} order={order} onClose={() => setIsReceiptOpen(false)} />
+      <OrderReceiptModal
+        visible={isReceiptOpen}
+        order={order}
+        onClose={() => {
+          setIsReceiptOpen(false);
+          // Only fires for a just-submitted draft that was a 5th/10th/...
+          // order; reopening any other receipt shows nothing.
+          showInterstitialIfDue(order?.id);
+        }}
+      />
     </ScrollView>
   );
 }
